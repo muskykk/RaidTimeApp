@@ -8,8 +8,10 @@
   var today = new Date();
   var viewDate = new Date(today.getFullYear(), today.getMonth(), 1);
 
-  /** @type {{ events: any[], bundles: any[] }} */
-  var state = { events: [], bundles: [] };
+  var DEFAULT_SETTINGS = { timeFormat: '24h', dateFormat: 'MM/DD/YYYY', startWithWindows: true };
+
+  /** @type {{ events: any[], bundles: any[], settings: any }} */
+  var state = { events: [], bundles: [], settings: Object.assign({}, DEFAULT_SETTINGS) };
 
   // ---------- helpers ----------
 
@@ -22,8 +24,24 @@
   }
   function formatDateHuman(k) {
     var parts = k.split('-').map(Number);
-    var d = new Date(parts[0], parts[1] - 1, parts[2]);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    var y = parts[0], mo = pad(parts[1]), d = pad(parts[2]);
+    switch (state.settings.dateFormat) {
+      case 'DD/MM/YYYY': return d + '/' + mo + '/' + y;
+      case 'YYYY/MM/DD': return y + '/' + mo + '/' + d;
+      default: return mo + '/' + d + '/' + y; // MM/DD/YYYY
+    }
+  }
+
+  // Display-only: reformats a canonical 24h "HH:MM" string for the user's
+  // time-format setting. Never used for native <input type="time"> values,
+  // which must stay in canonical HH:MM regardless of this setting.
+  function formatTimeDisplay(hhmm) {
+    if (state.settings.timeFormat !== '12h') return hhmm;
+    var parts = hhmm.split(':').map(Number);
+    var period = parts[0] >= 12 ? 'PM' : 'AM';
+    var h12 = parts[0] % 12;
+    if (h12 === 0) h12 = 12;
+    return h12 + ':' + pad(parts[1]) + ' ' + period;
   }
 
   function getBundle(id) {
@@ -89,8 +107,8 @@
   function effectiveEndTime(ev) { return applyHourOffset(ev.endTime, bundleOffset(ev)); }
 
   function scheduleSummary(ev) {
-    var start = effectiveStartTime(ev);
-    var end = effectiveEndTime(ev);
+    var start = formatTimeDisplay(effectiveStartTime(ev));
+    var end = formatTimeDisplay(effectiveEndTime(ev));
     if (ev.kind === 'punctual') {
       return formatDateHuman(ev.date) + ' · ' + start + '–' + end;
     }
@@ -116,7 +134,7 @@
   // ---------- persistence ----------
 
   function persist() {
-    window.api.saveData({ version: 1, events: state.events, bundles: state.bundles });
+    window.api.saveData({ version: 1, events: state.events, bundles: state.bundles, settings: state.settings });
   }
 
   async function loadData() {
@@ -129,9 +147,17 @@
     if (loaded && loaded.events && loaded.bundles) {
       state.events = loaded.events;
       state.bundles = loaded.bundles;
+      state.settings = Object.assign({}, DEFAULT_SETTINGS, loaded.settings || {});
+      // Migrate a pre-settings data.json by writing the defaults back —
+      // safe here specifically because we just confirmed a real, successful
+      // read with actual events/bundles. Never persist on a failed/null
+      // load below: that would silently overwrite real data on disk with
+      // an empty state on nothing more than a transient read hiccup.
+      if (!loaded.settings) persist();
     } else {
       state.events = [];
       state.bundles = [];
+      state.settings = Object.assign({}, DEFAULT_SETTINGS);
     }
   }
 
@@ -178,7 +204,7 @@
       dayEvents.slice(0, 3).forEach(function (ev) {
         var pill = document.createElement('div');
         pill.className = 'event color-' + effectiveColor(ev);
-        pill.textContent = effectiveStartTime(ev) + ' ' + effectiveTitle(ev);
+        pill.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' ' + effectiveTitle(ev);
         pill.addEventListener('click', function () { openEventEditModal(ev.id); });
         eventsWrap.appendChild(pill);
       });
@@ -230,6 +256,7 @@
     ['bundleDetailModalOverlay', ['bundleDetailModalClose', 'bundleDetailCloseBtn']],
     ['exportModalOverlay', ['exportModalClose', 'exportCloseBtn']],
     ['importModalOverlay', ['importModalClose', 'importCancelBtn']],
+    ['settingsModalOverlay', ['settingsModalClose', 'settingsCancelBtn']],
   ].forEach(function (pair) {
     var overlay = document.getElementById(pair[0]);
     pair[1].forEach(function (btnId) {
@@ -1007,6 +1034,47 @@
     var msg = 'Imported bundle "' + summary.bundleTitle + '" with ' + summary.importedEvents + ' event(s).';
     if (summary.skipped) msg += ' Skipped ' + summary.skipped + ' invalid entr' + (summary.skipped === 1 ? 'y' : 'ies') + '.';
     window.alert(msg);
+  });
+
+  // ---------- settings ----------
+
+  var settingsModalOverlay = document.getElementById('settingsModalOverlay');
+  var timeFormat24Btn = document.getElementById('timeFormat24Btn');
+  var timeFormat12Btn = document.getElementById('timeFormat12Btn');
+  var dateFormatSelect = document.getElementById('dateFormatSelect');
+  var startWithWindowsToggle = document.getElementById('startWithWindowsToggle');
+  var settingsModalTimeFormat = '24h';
+
+  function setSettingsModalTimeFormat(fmt) {
+    settingsModalTimeFormat = fmt;
+    timeFormat24Btn.classList.toggle('active', fmt === '24h');
+    timeFormat12Btn.classList.toggle('active', fmt === '12h');
+  }
+  timeFormat24Btn.addEventListener('click', function () { setSettingsModalTimeFormat('24h'); });
+  timeFormat12Btn.addEventListener('click', function () { setSettingsModalTimeFormat('12h'); });
+
+  document.getElementById('settingsBtn').addEventListener('click', async function () {
+    setSettingsModalTimeFormat(state.settings.timeFormat);
+    dateFormatSelect.value = state.settings.dateFormat;
+    var liveLoginItemStatus = null;
+    try {
+      liveLoginItemStatus = await window.api.getLoginItemStatus();
+    } catch (e) {
+      liveLoginItemStatus = null;
+    }
+    startWithWindowsToggle.checked = liveLoginItemStatus != null ? liveLoginItemStatus : state.settings.startWithWindows;
+    openModal(settingsModalOverlay);
+  });
+
+  document.getElementById('settingsSaveBtn').addEventListener('click', function () {
+    state.settings = {
+      timeFormat: settingsModalTimeFormat,
+      dateFormat: dateFormatSelect.value,
+      startWithWindows: startWithWindowsToggle.checked,
+    };
+    persist();
+    renderCalendar();
+    closeModal(settingsModalOverlay);
   });
 
   // ---------- init ----------
