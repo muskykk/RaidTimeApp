@@ -12,6 +12,36 @@
   "devDependencies": {
     "@types/node": "^20.14.2",
     "electron": "^31.0.2",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.5.2"
+  },
+  "build": {
+    "appId": "com.raidtimeapp.app",
+    "productName": "RaidTimeApp",
+    "electronLanguages": ["en-US"],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "renderer/**/*",
+      "assets/icon.png",
+      "assets/tray-icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon-source.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "${productName}-Setup-${version}.exe"
+    }
   }
 }
