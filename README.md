@@ -6,6 +6,22 @@ recurring raid nights, one-off events, and get a reminder before they start
 
 <img src="docs/screenshots/calendar.png" width="760" alt="Calendar view">
 
+## Installation
+
+1. Go to the [Releases page](../../releases) and download the latest
+   `RaidTimeApp-Setup-*.exe`.
+2. Run the installer. Windows SmartScreen will likely show an "Unrecognized
+   app" warning since it isn't code-signed — click **More info**, then
+   **Run anyway** to proceed.
+3. Follow the setup wizard (you can choose the install folder, and whether
+   to create desktop/Start Menu shortcuts). No admin rights are required.
+4. Once installed, launch RaidTimeApp from the Start Menu or desktop
+   shortcut like any other app.
+
+Uninstalling later (via Windows Settings → Apps) removes the program but
+keeps your saved schedule, so reinstalling picks up right where you left
+off.
+
 ## What it does
 
 - **Recurring or one-time events** — set a raid to repeat every week on
