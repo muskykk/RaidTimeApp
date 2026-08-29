@@ -18,7 +18,6 @@
       </div>
       <div class="nav-group">
         <button id="bundlesBtn" class="btn btn-ghost">Bundles</button>
-        <button id="newBundleBtn" class="btn btn-ghost">+ Bundle</button>
         <button id="newEventBtn" class="btn btn-primary">+ Event</button>
         <span class="divider"></span>
         <button id="prevBtn" class="btn btn-icon" title="Previous month">&#8249;</button>
@@ -141,7 +140,10 @@
   <div class="modal-overlay" id="bundleModalOverlay">
     <div class="modal">
       <div class="modal-header">
-        <h2 id="bundleModalTitle">New Bundle</h2>
+        <div class="modal-header-title">
+          <button class="modal-back" id="bundleModalBackBtn" title="Back">&#8249;</button>
+          <h2 id="bundleModalTitle">New Bundle</h2>
+        </div>
         <button class="modal-close" id="bundleModalClose">&times;</button>
       </div>
       <div class="modal-body">
@@ -157,7 +159,6 @@
           <span>Color</span>
           <div class="swatch-row" id="bundleColorSwatches"></div>
         </div>
-        <p class="hint-text">Title and description are inherited by every event in the bundle, unless an event is individually customized. Color always applies to every event in the bundle and cannot be overridden per event.</p>
         <p class="error-text" id="bundleFormError" hidden></p>
       </div>
       <div class="modal-footer">
@@ -180,6 +181,7 @@
         <ul class="bundle-list" id="bundlesList"></ul>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-ghost" id="newBundleBtn">+ Bundle</button>
         <button class="btn btn-ghost" id="importBundleBtn">Import Bundle</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="bundlesListCloseBtn">Close</button>
@@ -191,7 +193,10 @@
   <div class="modal-overlay" id="bundleDetailModalOverlay">
     <div class="modal modal-wide">
       <div class="modal-header">
-        <h2 id="bundleDetailTitle">Bundle</h2>
+        <div class="modal-header-title">
+          <button class="modal-back" id="bundleDetailBackBtn" title="Back">&#8249;</button>
+          <h2 id="bundleDetailTitle">Bundle</h2>
+        </div>
         <button class="modal-close" id="bundleDetailModalClose">&times;</button>
       </div>
       <div class="modal-body">

@@ -563,7 +563,10 @@
     openModal(bundleModalOverlay);
   }
 
-  document.getElementById('newBundleBtn').addEventListener('click', openBundleCreateModal);
+  document.getElementById('newBundleBtn').addEventListener('click', function () {
+    closeModal(bundlesListModalOverlay);
+    openBundleCreateModal();
+  });
 
   document.getElementById('bundleSaveBtn').addEventListener('click', function () {
     if (!bundleTitleInput.value.trim()) {
@@ -590,6 +593,17 @@
       persist();
       closeModal(bundleModalOverlay);
       openBundleDetailModal(newBundle.id);
+    }
+  });
+
+  document.getElementById('bundleModalBackBtn').addEventListener('click', function () {
+    closeModal(bundleModalOverlay);
+    // New bundles are only created from the Bundles list; editing is only
+    // entered from a bundle's detail view — back returns to whichever one.
+    if (bundleModalEditingId) {
+      openBundleDetailModal(bundleModalEditingId);
+    } else {
+      openBundlesListModal();
     }
   });
 
@@ -729,6 +743,11 @@
     renderBundleDetail(bundleId);
     openModal(bundleDetailModalOverlay);
   }
+
+  document.getElementById('bundleDetailBackBtn').addEventListener('click', function () {
+    closeModal(bundleDetailModalOverlay);
+    openBundlesListModal();
+  });
 
   document.getElementById('bundleEditBtn').addEventListener('click', function () {
     if (currentDetailBundleId) openBundleEditModal(currentDetailBundleId);
