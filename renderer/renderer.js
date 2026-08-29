@@ -999,7 +999,7 @@
     if (!currentDetailBundleId) return;
     var payload = buildBundleExportPayload(currentDetailBundleId);
     if (!payload) return;
-    exportTextarea.value = JSON.stringify(payload, null, 2);
+    exportTextarea.value = JSON.stringify(payload);
     openModal(exportModalOverlay);
     exportTextarea.focus();
     exportTextarea.select();
