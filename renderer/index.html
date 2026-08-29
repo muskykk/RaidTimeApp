@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+<title>RaidTimeApp</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="toolbar">
+      <div class="brand">
+        <div class="brand-mark">RT</div>
+        <div class="brand-text">
+          <h1 id="monthYear">Month Year</h1>
+          <span class="brand-sub">Raid Calendar</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button id="bundlesBtn" class="btn btn-ghost">Bundles</button>
+        <button id="newBundleBtn" class="btn btn-ghost">+ Bundle</button>
+        <button id="newEventBtn" class="btn btn-primary">+ Event</button>
+        <span class="divider"></span>
+        <button id="prevBtn" class="btn btn-icon" title="Previous month">&#8249;</button>
+        <button id="todayBtn" class="btn btn-ghost">Today</button>
+        <button id="nextBtn" class="btn btn-icon" title="Next month">&#8250;</button>
+      </div>
+    </header>
+
+    <div class="weekdays" id="weekdays"></div>
+    <div class="grid" id="grid"></div>
+  </div>
+
+  <!-- Event create/edit modal -->
+  <div class="modal-overlay" id="eventModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="eventModalTitle">New Event</h2>
+        <button class="modal-close" id="eventModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="bundle-context" id="eventBundleContext" hidden>
+          Part of bundle: <strong id="eventBundleName"></strong>
+          <label class="checkbox-row">
+            <input type="checkbox" id="eventOverrideToggle" />
+            Customize title / description for this event
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Title</span>
+          <input type="text" id="eventTitle" maxlength="80" placeholder="e.g. Molten Core Clear" />
+        </label>
+
+        <label class="field">
+          <span>Description</span>
+          <textarea id="eventDescription" rows="2" placeholder="Optional details"></textarea>
+        </label>
+
+        <div class="field" id="eventColorField">
+          <span>Color</span>
+          <div class="swatch-row" id="eventColorSwatches"></div>
+        </div>
+
+        <div class="field">
+          <span>Type</span>
+          <div class="segmented">
+            <button type="button" class="segmented-btn active" data-kind="punctual" id="kindPunctualBtn">Punctual</button>
+            <button type="button" class="segmented-btn" data-kind="recurring" id="kindRecurringBtn">Recurring</button>
+          </div>
+        </div>
+
+        <div id="punctualFields">
+          <label class="field">
+            <span>Date</span>
+            <input type="date" id="eventDate" />
+          </label>
+        </div>
+
+        <div id="recurringFields" hidden>
+          <div class="field">
+            <span>Repeats on</span>
+            <div class="days-row" id="daysRow">
+              <label><input type="checkbox" value="0" /> Sun</label>
+              <label><input type="checkbox" value="1" /> Mon</label>
+              <label><input type="checkbox" value="2" /> Tue</label>
+              <label><input type="checkbox" value="3" /> Wed</label>
+              <label><input type="checkbox" value="4" /> Thu</label>
+              <label><input type="checkbox" value="5" /> Fri</label>
+              <label><input type="checkbox" value="6" /> Sat</label>
+            </div>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Starting</span>
+              <input type="date" id="eventRecurStart" />
+            </label>
+            <label class="field">
+              <span>Until (optional)</span>
+              <input type="date" id="eventRecurEnd" />
+            </label>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Start time</span>
+            <input type="time" id="eventStartTime" />
+          </label>
+          <label class="field">
+            <span>End time</span>
+            <input type="time" id="eventEndTime" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Notify</span>
+          <select id="eventNotify">
+            <option value="0">Never</option>
+            <option value="5">5 minutes prior</option>
+            <option value="10">10 minutes prior</option>
+            <option value="15">15 minutes prior</option>
+            <option value="30">30 minutes prior</option>
+          </select>
+        </label>
+
+        <p class="error-text" id="eventFormError" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="eventDeleteBtn" hidden>Delete</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="eventCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="eventSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bundle create/edit modal -->
+  <div class="modal-overlay" id="bundleModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="bundleModalTitle">New Bundle</h2>
+        <button class="modal-close" id="bundleModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label class="field">
+          <span>Title</span>
+          <input type="text" id="bundleTitle" maxlength="80" placeholder="e.g. Weekly Raid Schedule" />
+        </label>
+        <label class="field">
+          <span>Description</span>
+          <textarea id="bundleDescription" rows="2" placeholder="Optional details"></textarea>
+        </label>
+        <div class="field">
+          <span>Color</span>
+          <div class="swatch-row" id="bundleColorSwatches"></div>
+        </div>
+        <p class="hint-text">Title and description are inherited by every event in the bundle, unless an event is individually customized. Color always applies to every event in the bundle and cannot be overridden per event.</p>
+        <p class="error-text" id="bundleFormError" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="bundleCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="bundleSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bundles list modal -->
+  <div class="modal-overlay" id="bundlesListModalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Bundles</h2>
+        <button class="modal-close" id="bundlesListModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="bundlesListEmpty" class="hint-text" hidden>No bundles yet. Create one with "+ Bundle".</div>
+        <ul class="bundle-list" id="bundlesList"></ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="importBundleBtn">Import Bundle</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="bundlesListCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bundle detail modal -->
+  <div class="modal-overlay" id="bundleDetailModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2 id="bundleDetailTitle">Bundle</h2>
+        <button class="modal-close" id="bundleDetailModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint-text" id="bundleDetailMeta"></p>
+
+        <div class="offset-row">
+          <span class="hint-text">
+            Time offset (Daylight savings time correction): <strong id="bundleOffsetValue">0h</strong>
+          </span>
+          <button class="btn btn-ghost" id="bundleOffsetMinusBtn" title="Shift every event in this bundle 1 hour earlier">&minus;1h</button>
+          <button class="btn btn-ghost" id="bundleOffsetPlusBtn" title="Shift every event in this bundle 1 hour later">+1h</button>
+        </div>
+
+        <div class="bundle-detail-actions">
+          <button class="btn btn-ghost" id="bundleEditBtn">Edit Bundle Info</button>
+          <button class="btn btn-ghost" id="bundleAddEventBtn">+ Add Event</button>
+          <button class="btn btn-ghost" id="bundleExportBtn">Export</button>
+          <span class="spacer"></span>
+          <button class="btn btn-danger" id="bundleDeleteBtn">Delete Bundle</button>
+        </div>
+        <ul class="bundle-event-list" id="bundleEventList"></ul>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="bundleDetailCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export modal -->
+  <div class="modal-overlay" id="exportModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Export Bundle</h2>
+        <button class="modal-close" id="exportModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint-text">Copy this JSON to share or back up this bundle and all of its events. All times are standardized to UTC.</p>
+        <textarea id="exportTextarea" class="json-textarea" rows="16" readonly spellcheck="false"></textarea>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="exportCloseBtn">Close</button>
+        <button class="btn btn-primary" id="exportCopyBtn">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Import modal -->
+  <div class="modal-overlay" id="importModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Import Bundle</h2>
+        <button class="modal-close" id="importModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="hint-text">Paste a RaidTimeApp bundle export JSON below. It will be added as a new bundle alongside your existing ones.</p>
+        <textarea id="importTextarea" class="json-textarea" rows="16" spellcheck="false" placeholder="Paste JSON here..."></textarea>
+        <p class="error-text" id="importFormError" hidden></p>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="importCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="importConfirmBtn">Import</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
