@@ -32,9 +32,11 @@
     }
   }
 
-  // Display-only: reformats a canonical 24h "HH:MM" string for the user's
-  // time-format setting. Never used for native <input type="time"> values,
-  // which must stay in canonical HH:MM regardless of this setting.
+  // Reformats a canonical 24h "HH:MM" string for the user's time-format
+  // setting. Used both for read-only display text (pills, summaries,
+  // notifications) and as the displayed value of the custom time-field
+  // input (see createTimeField) — that field's own .value is never
+  // canonical, only what this produces / what parseLocalizedTime accepts.
   function formatTimeDisplay(hhmm) {
     if (state.settings.timeFormat !== '12h') return hhmm;
     var parts = hhmm.split(':').map(Number);
@@ -42,6 +44,99 @@
     var h12 = parts[0] % 12;
     if (h12 === 0) h12 = 12;
     return h12 + ':' + pad(parts[1]) + ' ' + period;
+  }
+
+  var DATE_FIELD_ORDER = {
+    'MM/DD/YYYY': ['M', 'D', 'Y'],
+    'DD/MM/YYYY': ['D', 'M', 'Y'],
+    'YYYY/MM/DD': ['Y', 'M', 'D'],
+  };
+
+  // Strict inverse of formatDateHuman: a displayed date string -> canonical
+  // 'YYYY-MM-DD', or null if it doesn't parse or isn't a real calendar date.
+  // Rejects overflow (e.g. "02/30/2026") via a Date round-trip instead of
+  // letting native Date silently roll it into March.
+  function parseLocalizedDate(text, fmt) {
+    text = String(text || '').trim();
+    var parts = text.split('/');
+    if (parts.length !== 3) return null;
+    if (!parts.every(function (p) { return /^\d+$/.test(p); })) return null;
+
+    var order = DATE_FIELD_ORDER[fmt] || DATE_FIELD_ORDER['MM/DD/YYYY'];
+    var y, mo, d;
+    order.forEach(function (token, i) {
+      var n = Number(parts[i]);
+      if (token === 'Y') y = n;
+      else if (token === 'M') mo = n;
+      else d = n;
+    });
+    if (String(y).length !== 4) return null;
+
+    var date = new Date(y, mo - 1, d);
+    if (date.getFullYear() !== y || date.getMonth() !== mo - 1 || date.getDate() !== d) return null;
+    return y + '-' + pad(mo) + '-' + pad(d);
+  }
+
+  // Strict inverse of formatTimeDisplay: a displayed time string -> canonical
+  // 24h 'HH:MM', or null if it doesn't parse / is out of range.
+  function parseLocalizedTime(text, fmt) {
+    text = String(text || '').trim();
+    if (fmt === '12h') {
+      var m12 = /^(\d{1,2}):(\d{2})\s*([AaPp][Mm])$/.exec(text);
+      if (!m12) return null;
+      var h12 = Number(m12[1]), min12 = Number(m12[2]);
+      if (h12 < 1 || h12 > 12 || min12 > 59) return null;
+      var period = m12[3].toUpperCase();
+      var h24 = h12 % 12;
+      if (period === 'PM') h24 += 12;
+      return pad(h24) + ':' + pad(min12);
+    }
+    var m24 = /^(\d{1,2}):(\d{2})$/.exec(text);
+    if (!m24) return null;
+    var h = Number(m24[1]), min = Number(m24[2]);
+    if (h > 23 || min > 59) return null;
+    return pad(h) + ':' + pad(min);
+  }
+
+  // Live input mask for a date field: strips everything but digits, caps at
+  // the format's total digit count (2+2+4), and auto-inserts '/' as soon as
+  // the next segment starts. So typing "12121232" straight through becomes
+  // "12/12/1232" as you go, instead of growing as a flat, unbounded digit
+  // string — a 9th digit is simply dropped, not appended. This only
+  // constrains *shape*; parseLocalizedDate still does real semantic
+  // validation (calendar-date correctness) on commit.
+  function maskDateInputValue(rawValue, fmt) {
+    var order = DATE_FIELD_ORDER[fmt] || DATE_FIELD_ORDER['MM/DD/YYYY'];
+    var lengths = { M: 2, D: 2, Y: 4 };
+    var totalDigits = lengths[order[0]] + lengths[order[1]] + lengths[order[2]];
+    var digits = rawValue.replace(/\D/g, '').slice(0, totalDigits);
+
+    var segs = [];
+    var idx = 0;
+    order.forEach(function (token) {
+      var len = lengths[token];
+      var seg = digits.slice(idx, idx + len);
+      idx += len;
+      if (seg) segs.push(seg);
+    });
+    return segs.join('/');
+  }
+
+  // Live input mask for a time field: caps at 4 digits (HHMM), auto-inserts
+  // ':' once minute digits start, and (12h only) appends a normalized AM/PM
+  // suffix built from whichever a/p/m letters were typed — so "20:00123"
+  // can't happen, the 5th+ digit is simply dropped rather than appended.
+  function maskTimeInputValue(rawValue, fmt) {
+    var digits = rawValue.replace(/\D/g, '').slice(0, 4);
+    var out = digits.length > 2 ? digits.slice(0, 2) + ':' + digits.slice(2) : digits;
+
+    if (fmt === '12h') {
+      var letters = rawValue.replace(/[^apmAPM]/g, '').toUpperCase().slice(0, 2);
+      if (letters && letters[0] !== 'A' && letters[0] !== 'P') letters = '';
+      if (letters.length === 2 && letters[1] !== 'M') letters = letters[0];
+      if (letters) out += (out ? ' ' : '') + letters;
+    }
+    return out;
   }
 
   function getBundle(id) {
@@ -391,6 +486,251 @@
     el.appendChild(ul);
   }
 
+  // ---------- shared date-picker popup ----------
+  // One popup, portaled outside every modal (see index.html) and reused by
+  // whichever date field opened it — only one can ever be open at a time.
+  // See .specs/features/custom-date-time-inputs/design.md.
+
+  var datePickerPopup = document.getElementById('datePickerPopup');
+  var datePickerMonthYearEl = document.getElementById('datePickerMonthYear');
+  var datePickerWeekdaysEl = document.getElementById('datePickerWeekdays');
+  var datePickerGridEl = document.getElementById('datePickerGrid');
+  var datePickerPrevBtn = document.getElementById('datePickerPrevBtn');
+  var datePickerNextBtn = document.getElementById('datePickerNextBtn');
+  var eventModalBodyEl = document.querySelector('#eventModalOverlay .modal-body');
+
+  var datePickerViewDate = new Date(today.getFullYear(), today.getMonth(), 1);
+  var datePickerActiveField = null;
+  var datePickerAnchorEl = null;
+  var datePickerSelected = null;
+
+  DAY_NAMES.forEach(function (name) {
+    var el = document.createElement('span');
+    el.textContent = name.slice(0, 2);
+    datePickerWeekdaysEl.appendChild(el);
+  });
+
+  function renderDatePickerGrid() {
+    datePickerMonthYearEl.textContent = MONTH_NAMES[datePickerViewDate.getMonth()] + ' ' + datePickerViewDate.getFullYear();
+    datePickerGridEl.innerHTML = '';
+
+    var firstOfMonth = new Date(datePickerViewDate.getFullYear(), datePickerViewDate.getMonth(), 1);
+    var startDate = addDays(firstOfMonth, -firstOfMonth.getDay());
+    var todayKeyStr = keyFor(today);
+    var cellDates = [];
+    for (var i = 0; i < 42; i++) cellDates.push(addDays(startDate, i));
+
+    cellDates.forEach(function (cellDate) {
+      var k = keyFor(cellDate);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'date-picker-day';
+      if (cellDate.getMonth() !== datePickerViewDate.getMonth()) btn.classList.add('outside');
+      if (k === todayKeyStr) btn.classList.add('today');
+      if (k === datePickerSelected) btn.classList.add('selected');
+      btn.textContent = String(cellDate.getDate());
+      btn.addEventListener('click', function () {
+        if (datePickerActiveField) datePickerActiveField.selectFromPopup(k);
+        closeDatePickerPopup();
+      });
+      datePickerGridEl.appendChild(btn);
+    });
+  }
+
+  datePickerPrevBtn.addEventListener('click', function () {
+    datePickerViewDate.setMonth(datePickerViewDate.getMonth() - 1);
+    renderDatePickerGrid();
+  });
+  datePickerNextBtn.addEventListener('click', function () {
+    datePickerViewDate.setMonth(datePickerViewDate.getMonth() + 1);
+    renderDatePickerGrid();
+  });
+
+  // .modal-body is overflow-y:auto and .modal is overflow:hidden, so the
+  // popup can't live inside either without being clipped/scrolled away —
+  // it's fixed-positioned from the icon button's real screen position instead.
+  function positionDatePickerPopup(anchorEl) {
+    var rect = anchorEl.getBoundingClientRect();
+    var popupWidth = datePickerPopup.offsetWidth;
+    var popupHeight = datePickerPopup.offsetHeight;
+    var top = rect.bottom + 6;
+    if (top + popupHeight > window.innerHeight) {
+      top = rect.top - popupHeight - 6;
+    }
+    var left = rect.right - popupWidth;
+    if (left < 8) left = 8;
+    datePickerPopup.style.top = Math.max(8, top) + 'px';
+    datePickerPopup.style.left = left + 'px';
+  }
+
+  function handleDatePickerOutsideClick(e) {
+    if (datePickerPopup.hidden) return;
+    if (datePickerPopup.contains(e.target)) return;
+    if (datePickerAnchorEl && datePickerAnchorEl.contains(e.target)) return;
+    closeDatePickerPopup();
+  }
+
+  function handleDatePickerKeydown(e) {
+    if (e.key === 'Escape') closeDatePickerPopup();
+  }
+
+  function openDatePickerPopup(field, anchorEl, initialValue) {
+    datePickerActiveField = field;
+    datePickerAnchorEl = anchorEl;
+    datePickerSelected = initialValue || null;
+
+    var base = today;
+    if (initialValue) {
+      var p = initialValue.split('-').map(Number);
+      base = new Date(p[0], p[1] - 1, p[2]);
+    }
+    datePickerViewDate = new Date(base.getFullYear(), base.getMonth(), 1);
+
+    datePickerPopup.hidden = false;
+    renderDatePickerGrid();
+    positionDatePickerPopup(anchorEl);
+
+    document.addEventListener('mousedown', handleDatePickerOutsideClick, true);
+    document.addEventListener('keydown', handleDatePickerKeydown, true);
+    window.addEventListener('resize', closeDatePickerPopup);
+    if (eventModalBodyEl) eventModalBodyEl.addEventListener('scroll', closeDatePickerPopup);
+  }
+
+  function closeDatePickerPopup() {
+    datePickerPopup.hidden = true;
+    datePickerActiveField = null;
+    datePickerAnchorEl = null;
+    document.removeEventListener('mousedown', handleDatePickerOutsideClick, true);
+    document.removeEventListener('keydown', handleDatePickerKeydown, true);
+    window.removeEventListener('resize', closeDatePickerPopup);
+    if (eventModalBodyEl) eventModalBodyEl.removeEventListener('scroll', closeDatePickerPopup);
+  }
+
+  // ---------- custom date/time field controllers ----------
+  // Presentation-layer wrappers around plain <input type="text">: display
+  // and accept the localized dateFormat/timeFormat, while every other call
+  // site keeps talking in canonical 'YYYY-MM-DD' / 24h 'HH:MM' via
+  // getValue()/setValue(). getValue() re-parses the field's current text
+  // (not a cached value) so it's always accurate even before blur.
+  // getValue() returns: the canonical string if valid, null if empty AND
+  // optional, or undefined if empty-but-required / invalid (callers treat
+  // undefined as "can't proceed, error is already shown inline").
+
+  function createDateField(opts) {
+    var canonical = null;
+    var controller;
+
+    function render() {
+      opts.inputEl.value = canonical ? formatDateHuman(canonical) : '';
+    }
+    function showError(msg) {
+      opts.errorEl.textContent = msg;
+      opts.errorEl.hidden = false;
+      opts.inputEl.classList.add('invalid');
+    }
+    function clearFieldError() {
+      opts.errorEl.hidden = true;
+      opts.inputEl.classList.remove('invalid');
+    }
+    function setValue(v) {
+      canonical = v || null;
+      clearFieldError();
+      render();
+    }
+    function getValue() {
+      var text = opts.inputEl.value.trim();
+      if (!text) {
+        clearFieldError();
+        canonical = null;
+        return opts.required ? undefined : null;
+      }
+      var parsed = parseLocalizedDate(text, state.settings.dateFormat);
+      if (parsed === null) {
+        showError('Enter a valid date (' + state.settings.dateFormat + ').');
+        return undefined;
+      }
+      clearFieldError();
+      canonical = parsed;
+      return parsed;
+    }
+
+    opts.inputEl.addEventListener('blur', function () {
+      var v = getValue();
+      if (v !== undefined) render();
+    });
+    opts.inputEl.addEventListener('input', function () {
+      var masked = maskDateInputValue(opts.inputEl.value, state.settings.dateFormat);
+      if (masked !== opts.inputEl.value) {
+        opts.inputEl.value = masked;
+        opts.inputEl.setSelectionRange(masked.length, masked.length);
+      }
+    });
+
+    opts.iconBtnEl.addEventListener('click', function () {
+      getValue();
+      openDatePickerPopup(controller, opts.iconBtnEl, canonical);
+    });
+
+    controller = {
+      getValue: getValue,
+      setValue: setValue,
+      selectFromPopup: function (dateStr) { setValue(dateStr); },
+    };
+    return controller;
+  }
+
+  function createTimeField(opts) {
+    var canonical = null;
+
+    function render() {
+      opts.inputEl.value = canonical ? formatTimeDisplay(canonical) : '';
+    }
+    function showError(msg) {
+      opts.errorEl.textContent = msg;
+      opts.errorEl.hidden = false;
+      opts.inputEl.classList.add('invalid');
+    }
+    function clearFieldError() {
+      opts.errorEl.hidden = true;
+      opts.inputEl.classList.remove('invalid');
+    }
+    function setValue(v) {
+      canonical = v || null;
+      clearFieldError();
+      render();
+    }
+    function getValue() {
+      var text = opts.inputEl.value.trim();
+      if (!text) {
+        clearFieldError();
+        canonical = null;
+        return undefined;
+      }
+      var parsed = parseLocalizedTime(text, state.settings.timeFormat);
+      if (parsed === null) {
+        showError(state.settings.timeFormat === '12h' ? 'Enter a valid time (e.g. 8:00 PM).' : 'Enter a valid time (e.g. 20:00).');
+        return undefined;
+      }
+      clearFieldError();
+      canonical = parsed;
+      return parsed;
+    }
+
+    opts.inputEl.addEventListener('blur', function () {
+      var v = getValue();
+      if (v !== undefined) render();
+    });
+    opts.inputEl.addEventListener('input', function () {
+      var masked = maskTimeInputValue(opts.inputEl.value, state.settings.timeFormat);
+      if (masked !== opts.inputEl.value) {
+        opts.inputEl.value = masked;
+        opts.inputEl.setSelectionRange(masked.length, masked.length);
+      }
+    });
+
+    return { getValue: getValue, setValue: setValue };
+  }
+
   // ---------- event modal ----------
 
   var eventModalOverlay = document.getElementById('eventModalOverlay');
@@ -406,13 +746,35 @@
   var kindRecurringBtn = document.getElementById('kindRecurringBtn');
   var punctualFields = document.getElementById('punctualFields');
   var recurringFields = document.getElementById('recurringFields');
-  var eventDateInput = document.getElementById('eventDate');
   var daysRow = document.getElementById('daysRow');
-  var eventRecurStartInput = document.getElementById('eventRecurStart');
-  var eventRecurEndInput = document.getElementById('eventRecurEnd');
-  var eventStartTimeInput = document.getElementById('eventStartTime');
-  var eventEndTimeInput = document.getElementById('eventEndTime');
   var eventNotifySelect = document.getElementById('eventNotify');
+
+  var eventDateField = createDateField({
+    inputEl: document.getElementById('eventDate'),
+    iconBtnEl: document.querySelector('.date-field-icon-btn[data-field="eventDate"]'),
+    errorEl: document.getElementById('eventDateError'),
+    required: true,
+  });
+  var eventRecurStartField = createDateField({
+    inputEl: document.getElementById('eventRecurStart'),
+    iconBtnEl: document.querySelector('.date-field-icon-btn[data-field="eventRecurStart"]'),
+    errorEl: document.getElementById('eventRecurStartError'),
+    required: true,
+  });
+  var eventRecurEndField = createDateField({
+    inputEl: document.getElementById('eventRecurEnd'),
+    iconBtnEl: document.querySelector('.date-field-icon-btn[data-field="eventRecurEnd"]'),
+    errorEl: document.getElementById('eventRecurEndError'),
+    required: false,
+  });
+  var eventStartTimeField = createTimeField({
+    inputEl: document.getElementById('eventStartTime'),
+    errorEl: document.getElementById('eventStartTimeError'),
+  });
+  var eventEndTimeField = createTimeField({
+    inputEl: document.getElementById('eventEndTime'),
+    errorEl: document.getElementById('eventEndTimeError'),
+  });
   var eventFormError = document.getElementById('eventFormError');
   var eventConflictResult = document.getElementById('eventConflictResult');
   var eventDeleteBtn = document.getElementById('eventDeleteBtn');
@@ -467,12 +829,12 @@
     eventModalSelectedColor = DEFAULT_COLOR;
     renderEventColorSwatches();
     setKind('punctual');
-    eventDateInput.value = keyFor(today);
+    eventDateField.setValue(keyFor(today));
     Array.prototype.forEach.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { cb.checked = false; });
-    eventRecurStartInput.value = keyFor(today);
-    eventRecurEndInput.value = '';
-    eventStartTimeInput.value = '20:00';
-    eventEndTimeInput.value = '22:00';
+    eventRecurStartField.setValue(keyFor(today));
+    eventRecurEndField.setValue(null);
+    eventStartTimeField.setValue('20:00');
+    eventEndTimeField.setValue('22:00');
     eventNotifySelect.value = '0';
     setEventOwnFieldsEnabled(true);
     eventOverrideToggle.checked = false;
@@ -531,20 +893,20 @@
 
     setKind(ev.kind);
     if (ev.kind === 'punctual') {
-      eventDateInput.value = ev.date;
-      eventRecurStartInput.value = keyFor(today);
-      eventRecurEndInput.value = '';
+      eventDateField.setValue(ev.date);
+      eventRecurStartField.setValue(keyFor(today));
+      eventRecurEndField.setValue(null);
       Array.prototype.forEach.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { cb.checked = false; });
     } else {
-      eventDateInput.value = keyFor(today);
+      eventDateField.setValue(keyFor(today));
       Array.prototype.forEach.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) {
         cb.checked = ev.recurrence.daysOfWeek.indexOf(Number(cb.value)) !== -1;
       });
-      eventRecurStartInput.value = ev.recurrence.startDate;
-      eventRecurEndInput.value = ev.recurrence.endDate || '';
+      eventRecurStartField.setValue(ev.recurrence.startDate);
+      eventRecurEndField.setValue(ev.recurrence.endDate || null);
     }
-    eventStartTimeInput.value = ev.startTime;
-    eventEndTimeInput.value = ev.endTime;
+    eventStartTimeField.setValue(ev.startTime);
+    eventEndTimeField.setValue(ev.endTime);
     eventNotifySelect.value = String(ev.notifyMinutesBefore || 0);
 
     openModal(eventModalOverlay);
@@ -560,12 +922,15 @@
       eventFormError.hidden = false;
       return;
     }
-    if (!eventStartTimeInput.value || !eventEndTimeInput.value) {
-      eventFormError.textContent = 'Start and end time are required.';
+
+    var startTime = eventStartTimeField.getValue();
+    var endTime = eventEndTimeField.getValue();
+    if (startTime === undefined || endTime === undefined) {
+      eventFormError.textContent = 'Enter a valid start and end time (see field(s) above).';
       eventFormError.hidden = false;
       return;
     }
-    if (eventEndTimeInput.value === eventStartTimeInput.value) {
+    if (endTime === startTime) {
       eventFormError.textContent = 'Start and end time cannot be the same.';
       eventFormError.hidden = false;
       return;
@@ -573,18 +938,19 @@
 
     var payload = {
       kind: eventModalKind,
-      startTime: eventStartTimeInput.value,
-      endTime: eventEndTimeInput.value,
+      startTime: startTime,
+      endTime: endTime,
       notifyMinutesBefore: Number(eventNotifySelect.value),
     };
 
     if (eventModalKind === 'punctual') {
-      if (!eventDateInput.value) {
-        eventFormError.textContent = 'Date is required.';
+      var date = eventDateField.getValue();
+      if (date === undefined) {
+        eventFormError.textContent = 'Enter a valid date.';
         eventFormError.hidden = false;
         return;
       }
-      payload.date = eventDateInput.value;
+      payload.date = date;
       payload.recurrence = null;
     } else {
       var days = Array.prototype.filter.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { return cb.checked; })
@@ -594,16 +960,23 @@
         eventFormError.hidden = false;
         return;
       }
-      if (!eventRecurStartInput.value) {
-        eventFormError.textContent = 'A start date is required for recurring events.';
+      var recurStart = eventRecurStartField.getValue();
+      if (recurStart === undefined) {
+        eventFormError.textContent = 'Enter a valid start date for recurring events.';
+        eventFormError.hidden = false;
+        return;
+      }
+      var recurEnd = eventRecurEndField.getValue();
+      if (recurEnd === undefined) {
+        eventFormError.textContent = 'Enter a valid end date, or clear it.';
         eventFormError.hidden = false;
         return;
       }
       payload.date = null;
       payload.recurrence = {
         daysOfWeek: days,
-        startDate: eventRecurStartInput.value,
-        endDate: eventRecurEndInput.value || null,
+        startDate: recurStart,
+        endDate: recurEnd,
       };
     }
 
@@ -654,30 +1027,35 @@
   // filled in enough to check yet (mirrors eventSaveBtn's own validation,
   // but non-blocking — just declines to check rather than showing an error).
   function getEventFormCandidate() {
-    if (!eventStartTimeInput.value || !eventEndTimeInput.value) return null;
+    var startTime = eventStartTimeField.getValue();
+    var endTime = eventEndTimeField.getValue();
+    if (startTime === undefined || endTime === undefined) return null;
     if (eventModalKind === 'punctual') {
-      if (!eventDateInput.value) return null;
+      var date = eventDateField.getValue();
+      if (date === undefined) return null;
       return {
         kind: 'punctual',
-        date: eventDateInput.value,
+        date: date,
         recurrence: null,
-        startTime: eventStartTimeInput.value,
-        endTime: eventEndTimeInput.value,
+        startTime: startTime,
+        endTime: endTime,
       };
     }
     var days = Array.prototype.filter.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { return cb.checked; })
       .map(function (cb) { return Number(cb.value); });
-    if (days.length === 0 || !eventRecurStartInput.value) return null;
+    var recurStart = eventRecurStartField.getValue();
+    var recurEnd = eventRecurEndField.getValue();
+    if (days.length === 0 || recurStart === undefined || recurEnd === undefined) return null;
     return {
       kind: 'recurring',
       date: null,
       recurrence: {
         daysOfWeek: days,
-        startDate: eventRecurStartInput.value,
-        endDate: eventRecurEndInput.value || null,
+        startDate: recurStart,
+        endDate: recurEnd,
       },
-      startTime: eventStartTimeInput.value,
-      endTime: eventEndTimeInput.value,
+      startTime: startTime,
+      endTime: endTime,
     };
   }
 

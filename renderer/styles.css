@@ -727,3 +727,117 @@ textarea {
   resize: vertical;
   white-space: pre;
 }
+
+/* Custom date/time fields */
+
+.date-field {
+  display: flex;
+  gap: 6px;
+}
+
+.date-field-input,
+.time-field-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.date-field-icon-btn {
+  flex-shrink: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  width: 36px;
+  padding: 0;
+}
+
+.date-field-icon-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.date-field-input.invalid,
+.time-field-input.invalid {
+  border-color: var(--danger);
+}
+
+/* Shared date-picker popup — portaled to <body> (see index.html), fixed-
+   positioned from JS relative to whichever field's icon button opened it.
+   Deliberately outside every .modal, which clips/scrolls overflowing
+   content (see design.md). */
+
+.date-picker-popup {
+  position: fixed;
+  z-index: 70;
+  width: 290px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  padding: 12px;
+}
+
+.date-picker-popup[hidden] {
+  display: none;
+}
+
+.date-picker-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.date-picker-weekdays,
+.date-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.date-picker-weekdays {
+  margin-bottom: 4px;
+}
+
+.date-picker-weekdays span {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+}
+
+.date-picker-day {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+}
+
+.date-picker-day:hover {
+  background: var(--surface-2);
+}
+
+.date-picker-day.outside {
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.date-picker-day.today {
+  border-color: var(--today-ring);
+}
+
+.date-picker-day.selected {
+  background: var(--accent);
+  color: #fff;
+}
