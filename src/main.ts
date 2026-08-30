@@ -139,7 +139,7 @@ function createWindow(): void {
 function createTray(): void {
   const trayIconPath = path.join(__dirname, '..', 'assets', 'tray-icon.png');
   tray = new Tray(nativeImage.createFromPath(trayIconPath));
-  tray.setToolTip('RaidTimeApp');
+  updateTrayTooltip();
 
   const contextMenu = Menu.buildFromTemplate([
     {
@@ -187,6 +187,7 @@ ipcMain.handle('data:save', (_event, data: AppData) => {
   fs.writeFileSync(dataFilePath(), JSON.stringify(data, null, 2), 'utf-8');
   latestData = data;
   reconcileLoginItem(data.settings || DEFAULT_SETTINGS);
+  updateTrayTooltip();
   return true;
 });
 
@@ -236,6 +237,122 @@ function resolveEventTitle(ev: AppEvent): string {
   if (ev.title != null) return ev.title;
   const bundle = latestData.bundles.find((b) => b.id === ev.bundleId);
   return bundle ? bundle.title : 'Event';
+}
+
+// ---------- tray tooltip ----------
+// checkNotifications() below only asks "does this occur today" — enough
+// for firing today's reminders, not enough to find "the next occurrence,
+// however many days out." This duplicates a little occurrence-matching
+// logic that also exists in the renderer's getEventsForDate — main.ts and
+// renderer.js are separate, unbundled script contexts with no shared
+// module today, so a small third copy here is the pragmatic option. See
+// .specs/features/dynamic-tray-tooltip/design.md.
+
+const TRAY_LOOKAHEAD_DAYS = 30;
+
+interface Occurrence {
+  event: AppEvent;
+  start: Date;
+  end: Date;
+}
+
+function eventOccursOnDate(ev: AppEvent, date: Date): boolean {
+  const dayKey = todayKey(date);
+  const dow = date.getDay();
+  if (ev.kind === 'punctual') return ev.date === dayKey;
+  if (ev.kind === 'recurring' && ev.recurrence) {
+    return (
+      ev.recurrence.daysOfWeek.includes(dow) &&
+      dayKey >= ev.recurrence.startDate &&
+      (!ev.recurrence.endDate || dayKey <= ev.recurrence.endDate)
+    );
+  }
+  return false;
+}
+
+// Effective (hourOffset-applied) start/end as real Date objects on the
+// given calendar date, spilling into the next day if the event crosses
+// midnight — mirrors the overnight convention used throughout the app
+// (end <= start means it wraps).
+function occurrenceDateTimes(ev: AppEvent, date: Date): { start: Date; end: Date } {
+  const offset = resolveBundleOffset(ev);
+  const effStart = applyHourOffset(ev.startTime, offset);
+  const effEnd = applyHourOffset(ev.endTime, offset);
+  const [sh, sm] = effStart.split(':').map(Number);
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate(), sh, sm, 0, 0);
+  const [eh, em] = effEnd.split(':').map(Number);
+  let end = new Date(date.getFullYear(), date.getMonth(), date.getDate(), eh, em, 0, 0);
+  if (end <= start) end = new Date(end.getTime() + 24 * 60 * 60 * 1000);
+  return { start, end };
+}
+
+function findRelevantOccurrence(now: Date): Occurrence | null {
+  // In-progress can only be true for something that started today or
+  // yesterday (an overnight event) — check just those two days first.
+  for (let dOff = -1; dOff <= 0; dOff++) {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dOff);
+    for (const ev of latestData.events) {
+      if (ev.active === false) continue;
+      if (!eventOccursOnDate(ev, date)) continue;
+      const { start, end } = occurrenceDateTimes(ev, date);
+      if (now >= start && now < end) return { event: ev, start, end };
+    }
+  }
+
+  // Otherwise scan forward day by day. Because days are scanned in order
+  // and every event is checked before moving to the next day, the first
+  // day that yields any future-starting candidate necessarily contains
+  // the overall-earliest one — safe to stop there.
+  for (let dayOffset = 0; dayOffset <= TRAY_LOOKAHEAD_DAYS; dayOffset++) {
+    const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset);
+    let best: Occurrence | null = null;
+    for (const ev of latestData.events) {
+      if (ev.active === false) continue;
+      if (!eventOccursOnDate(ev, date)) continue;
+      const { start, end } = occurrenceDateTimes(ev, date);
+      if (start > now && (!best || start < best.start)) best = { event: ev, start, end };
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+const NO_UPCOMING_TOOLTIP = 'RaidTimeApp — no raids on the horizon';
+
+function hhmmOf(d: Date): string {
+  return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+function truncateTitle(title: string, maxLen: number): string {
+  return title.length > maxLen ? title.slice(0, maxLen - 1) + '…' : title;
+}
+
+function formatTrayTooltip(now: Date): string {
+  const occ = findRelevantOccurrence(now);
+  if (!occ) return NO_UPCOMING_TOOLTIP;
+
+  const title = truncateTitle(resolveEventTitle(occ.event), 40);
+
+  if (now >= occ.start && now < occ.end) {
+    return '🔴 ' + title + ' — ends ' + formatTimeForDisplay(hhmmOf(occ.end));
+  }
+
+  const diffMin = Math.round((occ.start.getTime() - now.getTime()) / 60000);
+  if (diffMin < 1) return '🔥 ' + title + ' is starting now';
+  if (diffMin < 60) return '⚔️ ' + title + ' in ' + diffMin + 'm';
+  if (diffMin < 24 * 60) {
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return '⚔️ ' + title + ' in ' + h + 'h' + (m ? ' ' + m + 'm' : '');
+  }
+  if (diffMin < 48 * 60) {
+    return '⚔️ ' + title + ' tomorrow at ' + formatTimeForDisplay(hhmmOf(occ.start));
+  }
+  return '⚔️ ' + title + ' in ' + Math.ceil(diffMin / (24 * 60)) + ' days';
+}
+
+function updateTrayTooltip(): void {
+  tray?.setToolTip(formatTrayTooltip(new Date()));
 }
 
 function fireEventNotification(ev: AppEvent, body: string): void {
@@ -331,7 +448,10 @@ if (gotSingleInstanceLock) {
     createWindow();
     createTray();
     checkNotifications();
-    setInterval(checkNotifications, 20000);
+    setInterval(() => {
+      checkNotifications();
+      updateTrayTooltip();
+    }, 20000);
   });
 
   // Closing the window (the X button) fully quits the app, unlike minimize.

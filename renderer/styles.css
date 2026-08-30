@@ -841,3 +841,38 @@ textarea {
   background: var(--accent);
   color: #fff;
 }
+
+/* Undo-on-delete toast — portaled to <body> (see index.html) for the same
+   reason as the date-picker popup: it must survive a modal closing. */
+
+.undo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.undo-toast[hidden] {
+  display: none;
+}
+
+.undo-toast-bar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  width: 100%;
+  background: var(--accent);
+  transform-origin: left;
+}

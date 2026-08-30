@@ -363,6 +363,15 @@
     <div class="date-picker-grid" id="datePickerGrid"></div>
   </div>
 
+  <!-- Undo-on-delete toast, portaled outside any modal so it stays visible
+       even after the modal that triggered a delete has closed. -->
+  <div class="undo-toast" id="undoToast" hidden>
+    <span id="undoToastMessage"></span>
+    <button type="button" class="btn btn-ghost" id="undoToastBtn">Undo</button>
+    <button type="button" class="modal-close" id="undoToastCloseBtn" title="Dismiss" aria-label="Dismiss">&times;</button>
+    <div class="undo-toast-bar" id="undoToastBar"></div>
+  </div>
+
   <script src="renderer.js"></script>
 </body>
 </html>

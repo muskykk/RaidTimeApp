@@ -731,6 +731,57 @@
     return { getValue: getValue, setValue: setValue };
   }
 
+  // ---------- undo-on-delete toast ----------
+  // Second safety net alongside (not instead of) the existing
+  // window.confirm() dialogs for all three delete actions (event delete,
+  // event delete from Bundle Detail, bundle delete): confirming still
+  // deletes immediately, but a 10s undo window follows. Only one pending
+  // undo is ever live — a second delete finalizes the first (nothing to
+  // restore for it anymore, matching e.g. Gmail's "undo send").
+  // See .specs/features/undo-delete-toast/design.md.
+
+  var UNDO_TOAST_MS = 10000;
+  var undoToastEl = document.getElementById('undoToast');
+  var undoToastMessageEl = document.getElementById('undoToastMessage');
+  var undoToastBtn = document.getElementById('undoToastBtn');
+  var undoToastCloseBtn = document.getElementById('undoToastCloseBtn');
+  var undoToastBarEl = document.getElementById('undoToastBar');
+  var pendingUndo = null;
+  var undoToastTimeoutId = null;
+
+  function finalizeUndoToast() {
+    pendingUndo = null;
+    clearTimeout(undoToastTimeoutId);
+    undoToastEl.hidden = true;
+  }
+
+  function showUndoToast(message, restoreFn) {
+    if (pendingUndo) finalizeUndoToast();
+    pendingUndo = { restore: restoreFn };
+
+    undoToastMessageEl.textContent = message;
+    undoToastEl.hidden = false;
+
+    undoToastBarEl.style.transition = 'none';
+    undoToastBarEl.style.transform = 'scaleX(1)';
+    // eslint-disable-next-line no-unused-expressions
+    undoToastBarEl.offsetHeight; // force reflow so the transition below actually animates
+    undoToastBarEl.style.transition = 'transform ' + (UNDO_TOAST_MS / 1000) + 's linear';
+    undoToastBarEl.style.transform = 'scaleX(0)';
+
+    undoToastTimeoutId = setTimeout(finalizeUndoToast, UNDO_TOAST_MS);
+  }
+
+  undoToastBtn.addEventListener('click', function () {
+    if (!pendingUndo) return;
+    var restore = pendingUndo.restore;
+    pendingUndo = null;
+    clearTimeout(undoToastTimeoutId);
+    undoToastEl.hidden = true;
+    restore();
+  });
+  undoToastCloseBtn.addEventListener('click', finalizeUndoToast);
+
   // ---------- event modal ----------
 
   var eventModalOverlay = document.getElementById('eventModalOverlay');
@@ -1013,13 +1064,24 @@
   eventDeleteBtn.addEventListener('click', function () {
     if (!eventModalEditingId) return;
     if (!window.confirm('Delete this event?')) return;
+    var deleted = state.events.find(function (e) { return e.id === eventModalEditingId; });
+    if (!deleted) return;
+    var deletedBundleId = currentDetailBundleId;
     state.events = state.events.filter(function (e) { return e.id !== eventModalEditingId; });
     persist();
     closeModal(eventModalOverlay);
     renderCalendar();
-    if (bundleDetailModalOverlay.classList.contains('open') && currentDetailBundleId) {
-      renderBundleDetail(currentDetailBundleId);
+    if (bundleDetailModalOverlay.classList.contains('open') && deletedBundleId) {
+      renderBundleDetail(deletedBundleId);
     }
+    showUndoToast(effectiveTitle(deleted) + ' deleted', function () {
+      state.events.push(deleted);
+      persist();
+      renderCalendar();
+      if (bundleDetailModalOverlay.classList.contains('open') && deletedBundleId) {
+        renderBundleDetail(deletedBundleId);
+      }
+    });
   });
 
   // Reads the event modal's current unsaved field values into a candidate
@@ -1278,6 +1340,12 @@
         persist();
         renderBundleDetail(bundleId);
         renderCalendar();
+        showUndoToast(effectiveTitle(ev) + ' deleted', function () {
+          state.events.push(ev);
+          persist();
+          renderBundleDetail(bundleId);
+          renderCalendar();
+        });
       });
 
       li.appendChild(dot);
@@ -1318,13 +1386,21 @@
   });
   document.getElementById('bundleDeleteBtn').addEventListener('click', function () {
     if (!currentDetailBundleId) return;
-    if (!window.confirm('Delete this bundle and all of its events? This cannot be undone.')) return;
+    if (!window.confirm('Delete this bundle and all of its events?')) return;
     var bundleId = currentDetailBundleId;
+    var deletedBundle = getBundle(bundleId);
+    var deletedEvents = eventsForBundle(bundleId);
     state.events = state.events.filter(function (e) { return e.bundleId !== bundleId; });
     state.bundles = state.bundles.filter(function (b) { return b.id !== bundleId; });
     persist();
     closeModal(bundleDetailModalOverlay);
     renderCalendar();
+    showUndoToast(deletedBundle.title + ' deleted', function () {
+      state.bundles.push(deletedBundle);
+      state.events = state.events.concat(deletedEvents);
+      persist();
+      renderCalendar();
+    });
   });
 
   // ---------- upcoming summary modal ----------
