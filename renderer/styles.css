@@ -543,6 +543,36 @@ textarea {
   margin: 0;
 }
 
+.conflict-result {
+  font-size: 12px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+}
+
+.conflict-result.ok {
+  color: var(--color-green);
+  border-color: color-mix(in srgb, var(--color-green) 40%, var(--border));
+}
+
+.conflict-result.has-conflicts {
+  color: #f87171;
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.conflict-result ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  color: var(--text);
+}
+
+.conflict-result li {
+  padding: 2px 0;
+}
+
 .bundle-list,
 .bundle-event-list {
   list-style: none;

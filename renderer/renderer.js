@@ -131,6 +131,80 @@
     }).sort(function (a, b) { return effectiveStartTime(a).localeCompare(effectiveStartTime(b)); });
   }
 
+  // ---------- conflict detection ----------
+  // Reasons about whether two events (an unsaved candidate + a saved Event,
+  // or two saved Events) could ever collide, without expanding either into
+  // concrete calendar-day occurrences. Two questions, kept separate:
+  // (a) can they ever land on the same calendar day (domainsCanShareDay),
+  // (b) given that, do their effective time windows overlap same-day
+  // (timeWindowsOverlap). Deliberately does NOT detect a conflict where one
+  // event spans past midnight into a different event scheduled early the
+  // next calendar day — see .specs/features/small-improvements/spec.md.
+
+  // Local (not UTC) day-of-week for a 'YYYY-MM-DD' string — distinct from
+  // weekdayOfDateStr below, which is UTC-only and used solely by export/import.
+  function localWeekdayOfDateStr(s) {
+    var p = s.split('-').map(Number);
+    return new Date(p[0], p[1] - 1, p[2]).getDay();
+  }
+
+  function dateRangesOverlap(aStart, aEnd, bStart, bEnd) {
+    if (aEnd && bStart > aEnd) return false;
+    if (bEnd && aStart > bEnd) return false;
+    return true;
+  }
+
+  function eventDomain(ev) {
+    return ev.kind === 'punctual'
+      ? { once: ev.date }
+      : { days: ev.recurrence.daysOfWeek, start: ev.recurrence.startDate, end: ev.recurrence.endDate };
+  }
+
+  function domainsCanShareDay(a, b) {
+    if (a.once && b.once) return a.once === b.once;
+    if (a.once) return domainsCanShareDay(b, a);
+    if (b.once) {
+      return b.once >= a.start && (!a.end || b.once <= a.end) &&
+        a.days.indexOf(localWeekdayOfDateStr(b.once)) !== -1;
+    }
+    if (!dateRangesOverlap(a.start, a.end, b.start, b.end)) return false;
+    return a.days.some(function (d) { return b.days.indexOf(d) !== -1; });
+  }
+
+  function timeToMinutes(t) {
+    var p = t.split(':').map(Number);
+    return p[0] * 60 + p[1];
+  }
+
+  function timeWindowsOverlap(aStart, aEnd, bStart, bEnd) {
+    var as = timeToMinutes(aStart), ae = timeToMinutes(aEnd);
+    var bs = timeToMinutes(bStart), be = timeToMinutes(bEnd);
+    if (ae <= as) ae += 1440;
+    if (be <= bs) be += 1440;
+    return as < be && bs < ae;
+  }
+
+  // candidate: { kind, date, recurrence, startTime, endTime } (unsaved form
+  // values or an imported item's parsed schedule); existing: a saved Event.
+  function eventsConflict(candidate, candidateOffset, existing) {
+    if (!domainsCanShareDay(eventDomain(candidate), eventDomain(existing))) return false;
+    var exOffset = bundleOffset(existing);
+    return timeWindowsOverlap(
+      applyHourOffset(candidate.startTime, candidateOffset),
+      applyHourOffset(candidate.endTime, candidateOffset),
+      applyHourOffset(existing.startTime, exOffset),
+      applyHourOffset(existing.endTime, exOffset)
+    );
+  }
+
+  function findConflicts(candidate, candidateOffset, excludeId) {
+    return state.events.filter(function (ev) {
+      if (ev.active === false) return false;
+      if (excludeId && ev.id === excludeId) return false;
+      return eventsConflict(candidate, candidateOffset, ev);
+    });
+  }
+
   // ---------- persistence ----------
 
   function persist() {
@@ -204,7 +278,8 @@
       dayEvents.slice(0, 3).forEach(function (ev) {
         var pill = document.createElement('div');
         pill.className = 'event color-' + effectiveColor(ev);
-        pill.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' ' + effectiveTitle(ev);
+        pill.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' - ' +
+          formatTimeDisplay(effectiveEndTime(ev)) + ' ' + effectiveTitle(ev);
         pill.addEventListener('click', function () { openEventEditModal(ev.id); });
         eventsWrap.appendChild(pill);
       });
@@ -257,6 +332,7 @@
     ['exportModalOverlay', ['exportModalClose', 'exportCloseBtn']],
     ['importModalOverlay', ['importModalClose', 'importCancelBtn']],
     ['settingsModalOverlay', ['settingsModalClose', 'settingsCancelBtn']],
+    ['upcomingModalOverlay', ['upcomingModalClose', 'upcomingCloseBtn']],
   ].forEach(function (pair) {
     var overlay = document.getElementById(pair[0]);
     pair[1].forEach(function (btnId) {
@@ -266,6 +342,54 @@
       if (e.target === overlay) closeModal(overlay);
     });
   });
+
+  // ---------- conflict result rendering (shared: event modal + import modal) ----------
+
+  function setConflictResultState(el, stateClass) {
+    el.hidden = false;
+    el.classList.remove('ok', 'has-conflicts');
+    if (stateClass) el.classList.add(stateClass);
+  }
+
+  // conflicts: array of existing Event objects that collide with one candidate.
+  function renderSingleConflictResult(el, conflicts) {
+    el.innerHTML = '';
+    if (conflicts.length === 0) {
+      setConflictResultState(el, 'ok');
+      el.textContent = 'No conflicts found.';
+      return;
+    }
+    setConflictResultState(el, 'has-conflicts');
+    el.appendChild(document.createTextNode('Conflicts with:'));
+    var ul = document.createElement('ul');
+    conflicts.forEach(function (ev) {
+      var li = document.createElement('li');
+      li.textContent = effectiveTitle(ev) + ' — ' + scheduleSummary(ev);
+      ul.appendChild(li);
+    });
+    el.appendChild(ul);
+  }
+
+  // results: array of { label, conflicts: Event[] } — one per candidate event.
+  function renderBatchConflictResult(el, results) {
+    el.innerHTML = '';
+    var conflicting = results.filter(function (r) { return r.conflicts.length > 0; });
+    if (conflicting.length === 0) {
+      setConflictResultState(el, 'ok');
+      el.textContent = 'No conflicts found.';
+      return;
+    }
+    setConflictResultState(el, 'has-conflicts');
+    el.appendChild(document.createTextNode(conflicting.length + ' of ' + results.length + ' event(s) conflict:'));
+    var ul = document.createElement('ul');
+    conflicting.forEach(function (r) {
+      var li = document.createElement('li');
+      var names = r.conflicts.map(function (ev) { return effectiveTitle(ev); }).join(', ');
+      li.textContent = r.label + ' — overlaps with ' + names;
+      ul.appendChild(li);
+    });
+    el.appendChild(ul);
+  }
 
   // ---------- event modal ----------
 
@@ -290,7 +414,9 @@
   var eventEndTimeInput = document.getElementById('eventEndTime');
   var eventNotifySelect = document.getElementById('eventNotify');
   var eventFormError = document.getElementById('eventFormError');
+  var eventConflictResult = document.getElementById('eventConflictResult');
   var eventDeleteBtn = document.getElementById('eventDeleteBtn');
+  var eventCheckConflictsBtn = document.getElementById('eventCheckConflictsBtn');
   var eventSaveBtn = document.getElementById('eventSaveBtn');
 
   var eventModalEditingId = null;
@@ -335,6 +461,7 @@
 
   function resetEventForm() {
     eventFormError.hidden = true;
+    eventConflictResult.hidden = true;
     eventTitleInput.value = '';
     eventDescriptionInput.value = '';
     eventModalSelectedColor = DEFAULT_COLOR;
@@ -380,6 +507,7 @@
     eventModalEditingId = eventId;
     eventModalBundleId = ev.bundleId;
     eventFormError.hidden = true;
+    eventConflictResult.hidden = true;
     eventModalTitleEl.textContent = 'Edit Event';
     eventDeleteBtn.hidden = false;
 
@@ -519,6 +647,51 @@
     if (bundleDetailModalOverlay.classList.contains('open') && currentDetailBundleId) {
       renderBundleDetail(currentDetailBundleId);
     }
+  });
+
+  // Reads the event modal's current unsaved field values into a candidate
+  // suitable for findConflicts. Returns null if the schedule fields aren't
+  // filled in enough to check yet (mirrors eventSaveBtn's own validation,
+  // but non-blocking — just declines to check rather than showing an error).
+  function getEventFormCandidate() {
+    if (!eventStartTimeInput.value || !eventEndTimeInput.value) return null;
+    if (eventModalKind === 'punctual') {
+      if (!eventDateInput.value) return null;
+      return {
+        kind: 'punctual',
+        date: eventDateInput.value,
+        recurrence: null,
+        startTime: eventStartTimeInput.value,
+        endTime: eventEndTimeInput.value,
+      };
+    }
+    var days = Array.prototype.filter.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { return cb.checked; })
+      .map(function (cb) { return Number(cb.value); });
+    if (days.length === 0 || !eventRecurStartInput.value) return null;
+    return {
+      kind: 'recurring',
+      date: null,
+      recurrence: {
+        daysOfWeek: days,
+        startDate: eventRecurStartInput.value,
+        endDate: eventRecurEndInput.value || null,
+      },
+      startTime: eventStartTimeInput.value,
+      endTime: eventEndTimeInput.value,
+    };
+  }
+
+  eventCheckConflictsBtn.addEventListener('click', function () {
+    var candidate = getEventFormCandidate();
+    if (!candidate) {
+      eventConflictResult.innerHTML = '';
+      setConflictResultState(eventConflictResult, null);
+      eventConflictResult.textContent = 'Fill in the date/time fields first.';
+      return;
+    }
+    var offset = eventModalBundleId ? bundleOffset({ bundleId: eventModalBundleId }) : 0;
+    var conflicts = findConflicts(candidate, offset, eventModalEditingId);
+    renderSingleConflictResult(eventConflictResult, conflicts);
   });
 
   // ---------- bundle modal (create/edit bundle info) ----------
@@ -776,6 +949,87 @@
     renderCalendar();
   });
 
+  // ---------- upcoming summary modal ----------
+
+  var upcomingModalOverlay = document.getElementById('upcomingModalOverlay');
+  var upcomingListEl = document.getElementById('upcomingList');
+  var upcomingEmptyEl = document.getElementById('upcomingEmpty');
+  var upcomingWindowDays = 3;
+
+  var UPCOMING_DAY_BUTTONS = [
+    [3, document.getElementById('upcoming3Btn')],
+    [5, document.getElementById('upcoming5Btn')],
+    [7, document.getElementById('upcoming7Btn')],
+  ];
+
+  function setUpcomingWindowDays(n) {
+    upcomingWindowDays = n;
+    UPCOMING_DAY_BUTTONS.forEach(function (pair) {
+      pair[1].classList.toggle('active', pair[0] === n);
+    });
+    renderUpcoming();
+  }
+  UPCOMING_DAY_BUTTONS.forEach(function (pair) {
+    pair[1].addEventListener('click', function () { setUpcomingWindowDays(pair[0]); });
+  });
+
+  function renderUpcoming() {
+    upcomingListEl.innerHTML = '';
+    var anyDay = false;
+
+    for (var i = 0; i < upcomingWindowDays; i++) {
+      var d = addDays(today, i);
+      var dayEvents = getEventsForDate(d);
+      if (dayEvents.length === 0) continue;
+      anyDay = true;
+
+      var headerLi = document.createElement('li');
+      headerLi.className = 'hint-text';
+      headerLi.style.marginTop = i === 0 ? '0' : '10px';
+      headerLi.textContent = formatDateHuman(keyFor(d)) + (keyFor(d) === keyFor(today) ? ' (Today)' : '');
+      upcomingListEl.appendChild(headerLi);
+
+      dayEvents.forEach(function (ev) {
+        var li = document.createElement('li');
+        var dot = document.createElement('i');
+        dot.className = 'dot color-' + effectiveColor(ev);
+        var info = document.createElement('div');
+        info.className = 'item-info';
+        var title = document.createElement('div');
+        title.className = 'item-title';
+        title.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' - ' +
+          formatTimeDisplay(effectiveEndTime(ev)) + ' ' + effectiveTitle(ev);
+        info.appendChild(title);
+        if (ev.bundleId) {
+          var b = getBundle(ev.bundleId);
+          if (b) {
+            var sub = document.createElement('div');
+            sub.className = 'item-sub';
+            sub.textContent = b.title;
+            info.appendChild(sub);
+          }
+        }
+        li.appendChild(dot);
+        li.appendChild(info);
+        li.addEventListener('click', function () {
+          closeModal(upcomingModalOverlay);
+          openEventEditModal(ev.id);
+        });
+        upcomingListEl.appendChild(li);
+      });
+    }
+
+    upcomingEmptyEl.hidden = anyDay;
+    if (!anyDay) {
+      upcomingEmptyEl.textContent = 'No events in the next ' + upcomingWindowDays + ' days.';
+    }
+  }
+
+  document.getElementById('upcomingBtn').addEventListener('click', function () {
+    setUpcomingWindowDays(upcomingWindowDays);
+    openModal(upcomingModalOverlay);
+  });
+
   // ---------- UTC conversion helpers ----------
   // The export/import format standardizes every date and time to UTC so a
   // file produced on one computer means the same real-world moment when
@@ -952,12 +1206,40 @@
     throw new Error('unknown scheduleType');
   }
 
-  function applyImportPayload(payload) {
+  // Shared shape validation for a parsed import payload — used by both the
+  // real import and the conflict-check preview, so the two can never
+  // disagree about what counts as "a valid RaidTimeApp bundle export."
+  function extractBundleFromPayload(payload) {
     var root = payload && payload.raidTimeAppExport;
     var b = root && root.bundle;
     if (!b || !Array.isArray(b.events)) {
       throw new Error('Not a valid RaidTimeApp bundle export.');
     }
+    return b;
+  }
+
+  // Parses every event's schedule (without importing anything) and checks
+  // each against existing active events. Invalid entries are silently
+  // skipped, same as the real import — that one already reports a "skipped"
+  // count, this preview only needs to answer the conflict question.
+  function previewImportConflicts(payload) {
+    var b = extractBundleFromPayload(payload);
+    var results = [];
+    b.events.forEach(function (item) {
+      var schedule;
+      try {
+        schedule = importSchedule(item.schedule);
+      } catch (e) {
+        return;
+      }
+      var label = item.title != null ? item.title : (b.title || 'Untitled Bundle');
+      results.push({ label: label, conflicts: findConflicts(schedule, 0, null) });
+    });
+    return results;
+  }
+
+  function applyImportPayload(payload) {
+    var b = extractBundleFromPayload(payload);
 
     var importedEvents = 0;
     var skipped = 0;
@@ -994,6 +1276,7 @@
   var importModalOverlay = document.getElementById('importModalOverlay');
   var importTextarea = document.getElementById('importTextarea');
   var importFormError = document.getElementById('importFormError');
+  var importConflictResult = document.getElementById('importConflictResult');
 
   document.getElementById('bundleExportBtn').addEventListener('click', function () {
     if (!currentDetailBundleId) return;
@@ -1018,8 +1301,37 @@
   document.getElementById('importBundleBtn').addEventListener('click', function () {
     importTextarea.value = '';
     importFormError.hidden = true;
+    importConflictResult.hidden = true;
     openModal(importModalOverlay);
     importTextarea.focus();
+  });
+
+  document.getElementById('importCheckConflictsBtn').addEventListener('click', function () {
+    importFormError.hidden = true;
+    importConflictResult.hidden = true;
+    var text = importTextarea.value.trim();
+    if (!text) {
+      importFormError.textContent = 'Paste a bundle export JSON first.';
+      importFormError.hidden = false;
+      return;
+    }
+    var parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (e) {
+      importFormError.textContent = 'That is not valid JSON.';
+      importFormError.hidden = false;
+      return;
+    }
+    var results;
+    try {
+      results = previewImportConflicts(parsed);
+    } catch (e) {
+      importFormError.textContent = e.message || 'That is not a valid RaidTimeApp bundle export.';
+      importFormError.hidden = false;
+      return;
+    }
+    renderBatchConflictResult(importConflictResult, results);
   });
 
   document.getElementById('importConfirmBtn').addEventListener('click', function () {

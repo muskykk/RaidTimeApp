@@ -18,6 +18,7 @@
       </div>
       <div class="nav-group">
         <button id="bundlesBtn" class="btn btn-ghost">Bundles</button>
+        <button id="upcomingBtn" class="btn btn-ghost">Upcoming</button>
         <button id="newEventBtn" class="btn btn-primary">+ Event</button>
         <span class="divider"></span>
         <button id="prevBtn" class="btn btn-icon" title="Previous month">&#8249;</button>
@@ -126,12 +127,40 @@
         </label>
 
         <p class="error-text" id="eventFormError" hidden></p>
+        <div class="conflict-result" id="eventConflictResult" hidden></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-danger" id="eventDeleteBtn" hidden>Delete</button>
+        <button class="btn btn-ghost" id="eventCheckConflictsBtn">Check for Conflicts</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="eventCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="eventSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upcoming summary modal -->
+  <div class="modal-overlay" id="upcomingModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Upcoming</h2>
+        <button class="modal-close" id="upcomingModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <span>Show next</span>
+          <div class="segmented">
+            <button type="button" class="segmented-btn" data-days="3" id="upcoming3Btn">3 days</button>
+            <button type="button" class="segmented-btn" data-days="5" id="upcoming5Btn">5 days</button>
+            <button type="button" class="segmented-btn" data-days="7" id="upcoming7Btn">7 days</button>
+          </div>
+        </div>
+        <div id="upcomingEmpty" class="hint-text" hidden></div>
+        <ul class="bundle-event-list" id="upcomingList"></ul>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="upcomingCloseBtn">Close</button>
       </div>
     </div>
   </div>
@@ -259,6 +288,7 @@
             <button type="button" class="segmented-btn" data-time-format="24h" id="timeFormat24Btn">24-hour</button>
             <button type="button" class="segmented-btn" data-time-format="12h" id="timeFormat12Btn">12-hour (AM/PM)</button>
           </div>
+          <small class="hint-text">Applies to the calendar, event lists, and notifications. The time picker fields (e.g. when adding an event) always use your Windows time format and are not affected by this setting.</small>
         </div>
 
         <label class="field">
@@ -268,6 +298,7 @@
             <option value="DD/MM/YYYY">DD/MM/YYYY</option>
             <option value="YYYY/MM/DD">YYYY/MM/DD</option>
           </select>
+          <small class="hint-text">Applies to the calendar, event lists, and notifications. The date picker fields (e.g. when adding an event) always use your Windows date format and are not affected by this setting.</small>
         </label>
 
         <label class="checkbox-row">
@@ -294,8 +325,10 @@
         <p class="hint-text">Paste a RaidTimeApp bundle export JSON below. It will be added as a new bundle alongside your existing ones.</p>
         <textarea id="importTextarea" class="json-textarea" rows="16" spellcheck="false" placeholder="Paste JSON here..."></textarea>
         <p class="error-text" id="importFormError" hidden></p>
+        <div class="conflict-result" id="importConflictResult" hidden></div>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-ghost" id="importCheckConflictsBtn">Check for Conflicts</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="importCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="importConfirmBtn">Import</button>
