@@ -18,6 +18,7 @@
       </div>
       <div class="nav-group">
         <button id="bundlesBtn" class="btn btn-ghost">Bundles</button>
+        <button id="upcomingBtn" class="btn btn-ghost">Upcoming</button>
         <button id="newEventBtn" class="btn btn-primary">+ Event</button>
         <span class="divider"></span>
         <button id="prevBtn" class="btn btn-icon" title="Previous month">&#8249;</button>
@@ -34,7 +35,7 @@
 
   <!-- Event create/edit modal -->
   <div class="modal-overlay" id="eventModalOverlay">
-    <div class="modal">
+    <div class="modal modal-wide">
       <div class="modal-header">
         <h2 id="eventModalTitle">New Event</h2>
         <button class="modal-close" id="eventModalClose">&times;</button>
@@ -74,7 +75,11 @@
         <div id="punctualFields">
           <label class="field">
             <span>Date</span>
-            <input type="date" id="eventDate" />
+            <div class="date-field">
+              <input type="text" id="eventDate" class="date-field-input" autocomplete="off" maxlength="10" />
+              <button type="button" class="date-field-icon-btn" data-field="eventDate" title="Open calendar" aria-label="Open calendar">&#128197;</button>
+            </div>
+            <small class="error-text" id="eventDateError" hidden></small>
           </label>
         </div>
 
@@ -94,11 +99,19 @@
           <div class="field-row">
             <label class="field">
               <span>Starting</span>
-              <input type="date" id="eventRecurStart" />
+              <div class="date-field">
+                <input type="text" id="eventRecurStart" class="date-field-input" autocomplete="off" maxlength="10" />
+                <button type="button" class="date-field-icon-btn" data-field="eventRecurStart" title="Open calendar" aria-label="Open calendar">&#128197;</button>
+              </div>
+              <small class="error-text" id="eventRecurStartError" hidden></small>
             </label>
             <label class="field">
               <span>Until (optional)</span>
-              <input type="date" id="eventRecurEnd" />
+              <div class="date-field">
+                <input type="text" id="eventRecurEnd" class="date-field-input" autocomplete="off" maxlength="10" />
+                <button type="button" class="date-field-icon-btn" data-field="eventRecurEnd" title="Open calendar" aria-label="Open calendar">&#128197;</button>
+              </div>
+              <small class="error-text" id="eventRecurEndError" hidden></small>
             </label>
           </div>
         </div>
@@ -106,11 +119,13 @@
         <div class="field-row">
           <label class="field">
             <span>Start time</span>
-            <input type="time" id="eventStartTime" />
+            <input type="text" id="eventStartTime" class="time-field-input" autocomplete="off" maxlength="8" />
+            <small class="error-text" id="eventStartTimeError" hidden></small>
           </label>
           <label class="field">
             <span>End time</span>
-            <input type="time" id="eventEndTime" />
+            <input type="text" id="eventEndTime" class="time-field-input" autocomplete="off" maxlength="8" />
+            <small class="error-text" id="eventEndTimeError" hidden></small>
           </label>
         </div>
 
@@ -126,12 +141,40 @@
         </label>
 
         <p class="error-text" id="eventFormError" hidden></p>
+        <div class="conflict-result" id="eventConflictResult" hidden></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-danger" id="eventDeleteBtn" hidden>Delete</button>
+        <button class="btn btn-ghost" id="eventCheckConflictsBtn">Check for Conflicts</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="eventCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="eventSaveBtn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Upcoming summary modal -->
+  <div class="modal-overlay" id="upcomingModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Upcoming</h2>
+        <button class="modal-close" id="upcomingModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field">
+          <span>Show next</span>
+          <div class="segmented">
+            <button type="button" class="segmented-btn" data-days="3" id="upcoming3Btn">3 days</button>
+            <button type="button" class="segmented-btn" data-days="5" id="upcoming5Btn">5 days</button>
+            <button type="button" class="segmented-btn" data-days="7" id="upcoming7Btn">7 days</button>
+          </div>
+        </div>
+        <div id="upcomingEmpty" class="hint-text" hidden></div>
+        <ul class="bundle-event-list" id="upcomingList"></ul>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="upcomingCloseBtn">Close</button>
       </div>
     </div>
   </div>
@@ -259,6 +302,7 @@
             <button type="button" class="segmented-btn" data-time-format="24h" id="timeFormat24Btn">24-hour</button>
             <button type="button" class="segmented-btn" data-time-format="12h" id="timeFormat12Btn">12-hour (AM/PM)</button>
           </div>
+          <small class="hint-text">Applies to the calendar, event lists, notifications, and the time fields when adding or editing an event.</small>
         </div>
 
         <label class="field">
@@ -268,6 +312,7 @@
             <option value="DD/MM/YYYY">DD/MM/YYYY</option>
             <option value="YYYY/MM/DD">YYYY/MM/DD</option>
           </select>
+          <small class="hint-text">Applies to the calendar, event lists, notifications, and the date fields when adding or editing an event.</small>
         </label>
 
         <label class="checkbox-row">
@@ -294,13 +339,37 @@
         <p class="hint-text">Paste a RaidTimeApp bundle export JSON below. It will be added as a new bundle alongside your existing ones.</p>
         <textarea id="importTextarea" class="json-textarea" rows="16" spellcheck="false" placeholder="Paste JSON here..."></textarea>
         <p class="error-text" id="importFormError" hidden></p>
+        <div class="conflict-result" id="importConflictResult" hidden></div>
       </div>
       <div class="modal-footer">
+        <button class="btn btn-ghost" id="importCheckConflictsBtn">Check for Conflicts</button>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="importCancelBtn">Cancel</button>
         <button class="btn btn-primary" id="importConfirmBtn">Import</button>
       </div>
     </div>
+  </div>
+
+  <!-- Shared date-picker popup, portaled outside any modal so it never
+       gets clipped by a modal's overflow/scroll. Reused by whichever date
+       field is currently open (only one is ever open at a time). -->
+  <div class="date-picker-popup" id="datePickerPopup" hidden>
+    <div class="date-picker-popup-header">
+      <button type="button" class="btn btn-icon" id="datePickerPrevBtn" title="Previous month">&#8249;</button>
+      <span id="datePickerMonthYear"></span>
+      <button type="button" class="btn btn-icon" id="datePickerNextBtn" title="Next month">&#8250;</button>
+    </div>
+    <div class="date-picker-weekdays" id="datePickerWeekdays"></div>
+    <div class="date-picker-grid" id="datePickerGrid"></div>
+  </div>
+
+  <!-- Undo-on-delete toast, portaled outside any modal so it stays visible
+       even after the modal that triggered a delete has closed. -->
+  <div class="undo-toast" id="undoToast" hidden>
+    <span id="undoToastMessage"></span>
+    <button type="button" class="btn btn-ghost" id="undoToastBtn">Undo</button>
+    <button type="button" class="modal-close" id="undoToastCloseBtn" title="Dismiss" aria-label="Dismiss">&times;</button>
+    <div class="undo-toast-bar" id="undoToastBar"></div>
   </div>
 
   <script src="renderer.js"></script>
