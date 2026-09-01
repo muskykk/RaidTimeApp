@@ -201,6 +201,20 @@
   function effectiveStartTime(ev) { return applyHourOffset(ev.startTime, bundleOffset(ev)); }
   function effectiveEndTime(ev) { return applyHourOffset(ev.endTime, bundleOffset(ev)); }
 
+  // True if ev's effective end time has already passed at the current
+  // moment - used to drop already-over events from today's Upcoming entry.
+  // Only meaningful for today: an overnight-spanning event (end <= start)
+  // is left alone rather than guessed at, matching this app's existing
+  // same-day-only precedent for overnight spans (see conflict-check).
+  function hasEventEndedToday(ev) {
+    var start = effectiveStartTime(ev);
+    var end = effectiveEndTime(ev);
+    if (end <= start) return false;
+    var now = new Date();
+    var nowHHMM = pad(now.getHours()) + ':' + pad(now.getMinutes());
+    return nowHHMM > end;
+  }
+
   function scheduleSummary(ev) {
     var start = formatTimeDisplay(effectiveStartTime(ev));
     var end = formatTimeDisplay(effectiveEndTime(ev));
@@ -355,40 +369,101 @@
     var startDate = addDays(firstOfMonth, -startOffset);
 
     for (var i = 0; i < 42; i++) {
-      var cellDate = addDays(startDate, i);
-      var cell = document.createElement('div');
-      cell.className = 'day-cell';
-      if (cellDate.getMonth() !== viewDate.getMonth()) cell.classList.add('outside');
-      if (keyFor(cellDate) === keyFor(today)) cell.classList.add('today');
-
-      var num = document.createElement('div');
-      num.className = 'day-num';
-      num.textContent = String(cellDate.getDate());
-      cell.appendChild(num);
-
-      var dayEvents = getEventsForDate(cellDate);
-      var eventsWrap = document.createElement('div');
-      eventsWrap.className = 'events';
-
-      dayEvents.slice(0, 3).forEach(function (ev) {
-        var pill = document.createElement('div');
-        pill.className = 'event color-' + effectiveColor(ev);
-        pill.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' - ' +
-          formatTimeDisplay(effectiveEndTime(ev)) + ' ' + effectiveTitle(ev);
-        pill.addEventListener('click', function () { openEventEditModal(ev.id); });
-        eventsWrap.appendChild(pill);
-      });
-
-      if (dayEvents.length > 3) {
-        var more = document.createElement('div');
-        more.className = 'event-more';
-        more.textContent = '+' + (dayEvents.length - 3) + ' more';
-        eventsWrap.appendChild(more);
-      }
-
-      cell.appendChild(eventsWrap);
-      gridEl.appendChild(cell);
+      gridEl.appendChild(buildDayCell(addDays(startDate, i)));
     }
+  }
+
+  // Split out of renderCalendar's loop so each cell's click handlers close
+  // over their own cellDate/dayEvents (a `var` inside the for-loop body
+  // would be shared across all 42 iterations, so every cell's handler would
+  // fire using the last day in the grid instead of its own).
+  function buildDayCell(cellDate) {
+    var cell = document.createElement('div');
+    cell.className = 'day-cell';
+    if (cellDate.getMonth() !== viewDate.getMonth()) cell.classList.add('outside');
+    if (keyFor(cellDate) === keyFor(today)) cell.classList.add('today');
+
+    var num = document.createElement('div');
+    num.className = 'day-num';
+    num.textContent = String(cellDate.getDate());
+    cell.appendChild(num);
+
+    var dayEvents = getEventsForDate(cellDate);
+    var eventsWrap = document.createElement('div');
+    eventsWrap.className = 'events';
+
+    dayEvents.slice(0, 3).forEach(function (ev) {
+      var pill = document.createElement('div');
+      pill.className = 'event color-' + effectiveColor(ev);
+      pill.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' - ' +
+        formatTimeDisplay(effectiveEndTime(ev)) + ' ' + effectiveTitle(ev);
+      pill.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openEventViewModal(ev.id);
+      });
+      eventsWrap.appendChild(pill);
+    });
+
+    if (dayEvents.length > 3) {
+      var more = document.createElement('div');
+      more.className = 'event-more';
+      more.textContent = '+' + (dayEvents.length - 3) + ' more';
+      more.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openDayAgendaModal(cellDate, dayEvents);
+      });
+      eventsWrap.appendChild(more);
+    }
+
+    cell.appendChild(eventsWrap);
+    // Clicking empty space in the cell (not a pill or "+N more") starts a
+    // new event pre-filled with this day's date. Pill/more clicks above
+    // stop propagation so this doesn't also fire on top of them.
+    cell.addEventListener('click', function () {
+      openEventCreateModal(null, keyFor(cellDate));
+    });
+    return cell;
+  }
+
+  var dayAgendaModalOverlay = document.getElementById('dayAgendaModalOverlay');
+  var dayAgendaModalTitle = document.getElementById('dayAgendaModalTitle');
+  var dayAgendaListEl = document.getElementById('dayAgendaList');
+
+  // Opened by clicking "+N more" on a day cell: every event for that single
+  // day, same row layout as the Upcoming list but with no day-count filter
+  // and no "today"/window restriction - just this one day.
+  function openDayAgendaModal(dateObj, dayEvents) {
+    dayAgendaModalTitle.textContent = formatDateHuman(keyFor(dateObj));
+    dayAgendaListEl.innerHTML = '';
+    dayEvents.forEach(function (ev) {
+      var li = document.createElement('li');
+      var dot = document.createElement('i');
+      dot.className = 'dot color-' + effectiveColor(ev);
+      var info = document.createElement('div');
+      info.className = 'item-info';
+      var title = document.createElement('div');
+      title.className = 'item-title';
+      title.textContent = formatTimeDisplay(effectiveStartTime(ev)) + ' - ' +
+        formatTimeDisplay(effectiveEndTime(ev)) + ' ' + effectiveTitle(ev);
+      info.appendChild(title);
+      if (ev.bundleId) {
+        var b = getBundle(ev.bundleId);
+        if (b) {
+          var sub = document.createElement('div');
+          sub.className = 'item-sub';
+          sub.textContent = b.title;
+          info.appendChild(sub);
+        }
+      }
+      li.appendChild(dot);
+      li.appendChild(info);
+      li.addEventListener('click', function () {
+        closeModal(dayAgendaModalOverlay);
+        openEventViewModal(ev.id);
+      });
+      dayAgendaListEl.appendChild(li);
+    });
+    openModal(dayAgendaModalOverlay);
   }
 
   function goToMonth(delta) {
@@ -421,6 +496,8 @@
 
   [
     ['eventModalOverlay', ['eventModalClose', 'eventCancelBtn']],
+    ['eventViewModalOverlay', ['eventViewModalClose', 'eventViewCloseBtn']],
+    ['dayAgendaModalOverlay', ['dayAgendaModalClose', 'dayAgendaCloseBtn']],
     ['bundleModalOverlay', ['bundleModalClose', 'bundleCancelBtn']],
     ['bundlesListModalOverlay', ['bundlesListModalClose', 'bundlesListCloseBtn']],
     ['bundleDetailModalOverlay', ['bundleDetailModalClose', 'bundleDetailCloseBtn']],
@@ -872,7 +949,8 @@
     }
   });
 
-  function resetEventForm() {
+  function resetEventForm(dateKey) {
+    var d = dateKey || keyFor(today);
     eventFormError.hidden = true;
     eventConflictResult.hidden = true;
     eventTitleInput.value = '';
@@ -880,9 +958,9 @@
     eventModalSelectedColor = DEFAULT_COLOR;
     renderEventColorSwatches();
     setKind('punctual');
-    eventDateField.setValue(keyFor(today));
+    eventDateField.setValue(d);
     Array.prototype.forEach.call(daysRow.querySelectorAll('input[type=checkbox]'), function (cb) { cb.checked = false; });
-    eventRecurStartField.setValue(keyFor(today));
+    eventRecurStartField.setValue(d);
     eventRecurEndField.setValue(null);
     eventStartTimeField.setValue('20:00');
     eventEndTimeField.setValue('22:00');
@@ -891,10 +969,13 @@
     eventOverrideToggle.checked = false;
   }
 
-  function openEventCreateModal(bundleId) {
+  // dateKey (optional, 'YYYY-MM-DD'): pre-fills the punctual date / recurring
+  // start date, used when creating an event by clicking a specific day cell
+  // on the calendar. Defaults to today, as before, when omitted.
+  function openEventCreateModal(bundleId, dateKey) {
     eventModalEditingId = null;
     eventModalBundleId = bundleId || null;
-    resetEventForm();
+    resetEventForm(dateKey);
     eventModalTitleEl.textContent = 'New Event';
     eventDeleteBtn.hidden = true;
 
@@ -1132,6 +1213,98 @@
     var offset = eventModalBundleId ? bundleOffset({ bundleId: eventModalBundleId }) : 0;
     var conflicts = findConflicts(candidate, offset, eventModalEditingId);
     renderSingleConflictResult(eventConflictResult, conflicts);
+  });
+
+  // ---------- event view (read-only) modal ----------
+  // Entry point for clicking an event from the calendar or Upcoming: shows
+  // details without risking an accidental edit. Delete and Check for
+  // Conflicts act directly here (against the event's saved values, no form
+  // involved); Edit hands off to the existing edit modal.
+
+  var eventViewModalOverlay = document.getElementById('eventViewModalOverlay');
+  var eventViewBundleContext = document.getElementById('eventViewBundleContext');
+  var eventViewBundleName = document.getElementById('eventViewBundleName');
+  var eventViewColorDot = document.getElementById('eventViewColorDot');
+  var eventViewTitle = document.getElementById('eventViewTitle');
+  var eventViewSchedule = document.getElementById('eventViewSchedule');
+  var eventViewDescription = document.getElementById('eventViewDescription');
+  var eventViewNotify = document.getElementById('eventViewNotify');
+  var eventViewConflictResult = document.getElementById('eventViewConflictResult');
+  var eventViewDeleteBtn = document.getElementById('eventViewDeleteBtn');
+  var eventViewCheckConflictsBtn = document.getElementById('eventViewCheckConflictsBtn');
+  var eventViewEditBtn = document.getElementById('eventViewEditBtn');
+
+  var eventViewingId = null;
+
+  function openEventViewModal(eventId) {
+    var ev = state.events.find(function (e) { return e.id === eventId; });
+    if (!ev) return;
+    eventViewingId = eventId;
+    eventViewConflictResult.hidden = true;
+    eventViewConflictResult.innerHTML = '';
+
+    var b = getBundle(ev.bundleId);
+    if (b) {
+      eventViewBundleContext.hidden = false;
+      eventViewBundleName.textContent = b.title;
+    } else {
+      eventViewBundleContext.hidden = true;
+    }
+
+    eventViewColorDot.className = 'dot color-' + effectiveColor(ev);
+    eventViewTitle.textContent = effectiveTitle(ev);
+    eventViewSchedule.textContent = scheduleSummary(ev);
+
+    var desc = effectiveDescription(ev);
+    eventViewDescription.textContent = desc || '';
+    eventViewDescription.hidden = !desc;
+
+    var lead = ev.notifyMinutesBefore || 0;
+    eventViewNotify.textContent = lead ? ('Notifies ' + lead + ' minute' + (lead === 1 ? '' : 's') + ' before') : 'No notification';
+
+    openModal(eventViewModalOverlay);
+  }
+
+  eventViewDeleteBtn.addEventListener('click', function () {
+    var deleted = state.events.find(function (e) { return e.id === eventViewingId; });
+    if (!deleted) return;
+    if (!window.confirm('Delete this event?')) return;
+    var deletedBundleId = deleted.bundleId;
+    state.events = state.events.filter(function (e) { return e.id !== eventViewingId; });
+    persist();
+    closeModal(eventViewModalOverlay);
+    renderCalendar();
+    if (bundleDetailModalOverlay.classList.contains('open') && deletedBundleId) {
+      renderBundleDetail(deletedBundleId);
+    }
+    showUndoToast(effectiveTitle(deleted) + ' deleted', function () {
+      state.events.push(deleted);
+      persist();
+      renderCalendar();
+      if (bundleDetailModalOverlay.classList.contains('open') && deletedBundleId) {
+        renderBundleDetail(deletedBundleId);
+      }
+    });
+  });
+
+  eventViewCheckConflictsBtn.addEventListener('click', function () {
+    var ev = state.events.find(function (e) { return e.id === eventViewingId; });
+    if (!ev) return;
+    var candidate = {
+      kind: ev.kind,
+      date: ev.date,
+      recurrence: ev.recurrence,
+      startTime: ev.startTime,
+      endTime: ev.endTime,
+    };
+    var conflicts = findConflicts(candidate, bundleOffset(ev), ev.id);
+    renderSingleConflictResult(eventViewConflictResult, conflicts);
+  });
+
+  eventViewEditBtn.addEventListener('click', function () {
+    var id = eventViewingId;
+    closeModal(eventViewModalOverlay);
+    openEventEditModal(id);
   });
 
   // ---------- bundle modal (create/edit bundle info) ----------
@@ -1434,6 +1607,9 @@
     for (var i = 0; i < upcomingWindowDays; i++) {
       var d = addDays(today, i);
       var dayEvents = getEventsForDate(d);
+      if (i === 0) {
+        dayEvents = dayEvents.filter(function (ev) { return !hasEventEndedToday(ev); });
+      }
       if (dayEvents.length === 0) continue;
       anyDay = true;
 
@@ -1467,7 +1643,7 @@
         li.appendChild(info);
         li.addEventListener('click', function () {
           closeModal(upcomingModalOverlay);
-          openEventEditModal(ev.id);
+          openEventViewModal(ev.id);
         });
         upcomingListEl.appendChild(li);
       });

@@ -153,6 +153,36 @@
     </div>
   </div>
 
+  <!-- Event view (read-only) modal -->
+  <div class="modal-overlay" id="eventViewModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2>Event Details</h2>
+        <button class="modal-close" id="eventViewModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="bundle-context" id="eventViewBundleContext" hidden>
+          Part of bundle: <strong id="eventViewBundleName"></strong>
+        </div>
+        <div class="event-view-heading">
+          <i class="dot" id="eventViewColorDot"></i>
+          <h3 id="eventViewTitle"></h3>
+        </div>
+        <p class="item-sub" id="eventViewSchedule"></p>
+        <p id="eventViewDescription" hidden></p>
+        <p class="hint-text" id="eventViewNotify"></p>
+        <div class="conflict-result" id="eventViewConflictResult" hidden></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger" id="eventViewDeleteBtn">Delete</button>
+        <button class="btn btn-ghost" id="eventViewCheckConflictsBtn">Check for Conflicts</button>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="eventViewCloseBtn">Close</button>
+        <button class="btn btn-primary" id="eventViewEditBtn">Edit</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Upcoming summary modal -->
   <div class="modal-overlay" id="upcomingModalOverlay">
     <div class="modal modal-wide">
@@ -175,6 +205,23 @@
       <div class="modal-footer">
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="upcomingCloseBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Day agenda modal (all of one day's events, opened from "+N more") -->
+  <div class="modal-overlay" id="dayAgendaModalOverlay">
+    <div class="modal modal-wide">
+      <div class="modal-header">
+        <h2 id="dayAgendaModalTitle">Events</h2>
+        <button class="modal-close" id="dayAgendaModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <ul class="bundle-event-list" id="dayAgendaList"></ul>
+      </div>
+      <div class="modal-footer">
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="dayAgendaCloseBtn">Close</button>
       </div>
     </div>
   </div>
