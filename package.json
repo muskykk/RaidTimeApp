@@ -1,6 +1,6 @@
 {
   "name": "raidtimeapp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Raid calendar manager for MMORPGs",
   "main": "dist/main.js",
   "private": true,
@@ -18,7 +18,9 @@
   "build": {
     "appId": "com.raidtimeapp.app",
     "productName": "RaidTimeApp",
-    "electronLanguages": ["en-US"],
+    "electronLanguages": [
+      "en-US"
+    ],
     "directories": {
       "output": "release"
     },
@@ -33,6 +35,11 @@
       "target": "nsis",
       "icon": "assets/icon-source.png"
     },
+    "publish": {
+      "provider": "github",
+      "owner": "muskykk",
+      "repo": "RaidTimeApp"
+    },
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -43,5 +50,8 @@
       "deleteAppDataOnUninstall": false,
       "artifactName": "${productName}-Setup-${version}.exe"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

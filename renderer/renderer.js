@@ -859,6 +859,47 @@
   });
   undoToastCloseBtn.addEventListener('click', finalizeUndoToast);
 
+  // ---------- update-ready toast ----------
+  // Main process only sends 'update:ready' once (while the window is
+  // visible - see notifyUpdateReadyIfVisible in main.ts), so there's no
+  // pending-state juggling here like the undo toast has: just show it,
+  // auto-dismiss it, and if the user clicks Restart hand off to main.
+  // Missing/dismissing this doesn't lose the update - main.ts's
+  // autoInstallOnAppQuit still applies it on the next full quit.
+
+  var updateToastEl = document.getElementById('updateToast');
+  var updateToastBtn = document.getElementById('updateToastBtn');
+  var updateToastCloseBtn = document.getElementById('updateToastCloseBtn');
+  var updateToastBarEl = document.getElementById('updateToastBar');
+  var UPDATE_TOAST_MS = 15000;
+  var updateToastTimeoutId = null;
+
+  function dismissUpdateToast() {
+    clearTimeout(updateToastTimeoutId);
+    updateToastEl.hidden = true;
+  }
+
+  function showUpdateToast() {
+    updateToastEl.hidden = false;
+    updateToastBarEl.style.transition = 'none';
+    updateToastBarEl.style.transform = 'scaleX(1)';
+    // eslint-disable-next-line no-unused-expressions
+    updateToastBarEl.offsetHeight; // force reflow so the transition below actually animates
+    updateToastBarEl.style.transition = 'transform ' + (UPDATE_TOAST_MS / 1000) + 's linear';
+    updateToastBarEl.style.transform = 'scaleX(0)';
+    updateToastTimeoutId = setTimeout(dismissUpdateToast, UPDATE_TOAST_MS);
+  }
+
+  updateToastBtn.addEventListener('click', function () {
+    dismissUpdateToast();
+    window.api.restartToUpdate();
+  });
+  updateToastCloseBtn.addEventListener('click', dismissUpdateToast);
+
+  if (window.api.onUpdateReady) {
+    window.api.onUpdateReady(showUpdateToast);
+  }
+
   // ---------- event modal ----------
 
   var eventModalOverlay = document.getElementById('eventModalOverlay');

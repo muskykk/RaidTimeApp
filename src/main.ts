@@ -1,4 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, Notification } from 'electron';
+import { autoUpdater } from 'electron-updater';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -134,6 +135,10 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // If an update finished downloading while the window was hidden to tray,
+  // this is what actually surfaces the toast once the user opens it back up.
+  mainWindow.on('show', notifyUpdateReadyIfVisible);
 }
 
 function createTray(): void {
@@ -434,6 +439,38 @@ function checkNotifications(): void {
   }
 }
 
+// ---------- auto-update ----------
+// Checks GitHub Releases (see build.publish in package.json) for a newer
+// version, downloads it silently in the background, and only bothers the
+// user with a toast if the window is actually open when it's ready - never
+// while just minimized to tray. If the toast is dismissed or never seen,
+// autoInstallOnAppQuit still applies the update the next time the app is
+// fully quit (the X button), so nothing is lost by staying quiet.
+
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let updateReady = false;
+let updateAlreadyNotified = false;
+
+autoUpdater.autoInstallOnAppQuit = true;
+autoUpdater.on('error', (err) => {
+  console.error('[auto-update]', err);
+});
+autoUpdater.on('update-downloaded', () => {
+  updateReady = true;
+  notifyUpdateReadyIfVisible();
+});
+
+function notifyUpdateReadyIfVisible(): void {
+  if (!updateReady || updateAlreadyNotified) return;
+  if (!mainWindow || !mainWindow.isVisible()) return;
+  updateAlreadyNotified = true;
+  mainWindow.webContents.send('update:ready');
+}
+
+ipcMain.handle('update:restart', () => {
+  autoUpdater.quitAndInstall();
+});
+
 if (gotSingleInstanceLock) {
   // A second launch attempt while we're already running — surface the
   // existing window instead of letting a competing instance start up.
@@ -452,6 +489,16 @@ if (gotSingleInstanceLock) {
       checkNotifications();
       updateTrayTooltip();
     }, 20000);
+
+    // Update checks only make sense against a packaged, installed build -
+    // an unpackaged `electron .` dev run has no installer version to
+    // compare against and no local dev-app-update.yml is set up for it.
+    if (app.isPackaged) {
+      autoUpdater.checkForUpdates().catch((err) => console.error('[auto-update]', err));
+      setInterval(() => {
+        autoUpdater.checkForUpdates().catch((err) => console.error('[auto-update]', err));
+      }, UPDATE_CHECK_INTERVAL_MS);
+    }
   });
 
   // Closing the window (the X button) fully quits the app, unlike minimize.

@@ -419,6 +419,16 @@
     <div class="undo-toast-bar" id="undoToastBar"></div>
   </div>
 
+  <!-- Update-ready toast, corner-positioned (not bottom-center like the
+       undo toast) so the two can never visually collide. Auto-dismisses;
+       if missed, the update still installs silently on next full quit. -->
+  <div class="update-toast" id="updateToast" hidden>
+    <span>Update ready.</span>
+    <button type="button" class="btn btn-ghost" id="updateToastBtn">Restart</button>
+    <button type="button" class="modal-close" id="updateToastCloseBtn" title="Dismiss" aria-label="Dismiss">&times;</button>
+    <div class="update-toast-bar" id="updateToastBar"></div>
+  </div>
+
   <script src="renderer.js"></script>
 </body>
 </html>
