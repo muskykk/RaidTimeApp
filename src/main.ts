@@ -201,6 +201,11 @@ ipcMain.handle('settings:getLoginItemStatus', () => {
   return app.getLoginItemSettings({ path: process.execPath, args: loginItemArgs() }).openAtLogin;
 });
 
+// Surfaces package.json's version in the UI (see renderer's header) so a
+// running instance's version is visible at a glance - handy for confirming
+// an auto-update actually landed, without digging through file properties.
+ipcMain.handle('app:getVersion', () => app.getVersion());
+
 // ---------- notifications ----------
 
 function pad2(n: number): string {
@@ -448,6 +453,14 @@ function checkNotifications(): void {
 // fully quit (the X button), so nothing is lost by staying quiet.
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+// How long the startup check waits to see if update-downloaded fires before
+// giving up on the "already cached from last session" fast path (see
+// startupAutoUpdateCheck below) and just letting the app open normally. A
+// cache hit resolves in well under a second; this is generous headroom, not
+// a real download budget - a genuine fresh download won't finish inside it,
+// which is exactly the point (that case falls through to the normal
+// toast/autoInstallOnAppQuit flow instead).
+const STARTUP_UPDATE_CHECK_TIMEOUT_MS = 5000;
 let updateReady = false;
 let updateAlreadyNotified = false;
 
@@ -471,6 +484,48 @@ ipcMain.handle('update:restart', () => {
   autoUpdater.quitAndInstall();
 });
 
+// Runs once at launch, before any window is created. If an update from a
+// previous session is already fully downloaded and cached on disk (e.g. the
+// prior session was killed by a Windows shutdown before autoInstallOnAppQuit
+// ever got a chance to run), checkForUpdates() re-validates it against the
+// cache almost instantly instead of re-downloading - so a fast
+// update-downloaded here means "already had this," not "just started
+// downloading." In that case, install and relaunch right now instead of
+// opening the old version and waiting for some future quit. Resolves false
+// (proceed with a normal launch) on a genuine fresh download, no update, or
+// any check error - those all fall through to the existing background
+// download + toast/autoInstallOnAppQuit flow, unaffected by this.
+function startupAutoUpdateCheck(): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+
+    function onDownloaded(): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      autoUpdater.quitAndInstall();
+      resolve(true);
+    }
+    autoUpdater.once('update-downloaded', onDownloaded);
+
+    const timeoutId = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      autoUpdater.removeListener('update-downloaded', onDownloaded);
+      resolve(false);
+    }, STARTUP_UPDATE_CHECK_TIMEOUT_MS);
+
+    autoUpdater.checkForUpdates().catch((err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      autoUpdater.removeListener('update-downloaded', onDownloaded);
+      console.error('[auto-update]', err);
+      resolve(false);
+    });
+  });
+}
+
 if (gotSingleInstanceLock) {
   // A second launch attempt while we're already running — surface the
   // existing window instead of letting a competing instance start up.
@@ -481,7 +536,18 @@ if (gotSingleInstanceLock) {
     }
   });
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // Update checks only make sense against a packaged, installed build -
+    // an unpackaged `electron .` dev run has no installer version to
+    // compare against and no local dev-app-update.yml is set up for it.
+    if (app.isPackaged) {
+      const installingUpdate = await startupAutoUpdateCheck();
+      // A pending update was already cached and quitAndInstall() has been
+      // called - the app is on its way out to relaunch as the new version,
+      // so don't bother creating a window for this launch at all.
+      if (installingUpdate) return;
+    }
+
     createWindow();
     createTray();
     checkNotifications();
@@ -490,11 +556,7 @@ if (gotSingleInstanceLock) {
       updateTrayTooltip();
     }, 20000);
 
-    // Update checks only make sense against a packaged, installed build -
-    // an unpackaged `electron .` dev run has no installer version to
-    // compare against and no local dev-app-update.yml is set up for it.
     if (app.isPackaged) {
-      autoUpdater.checkForUpdates().catch((err) => console.error('[auto-update]', err));
       setInterval(() => {
         autoUpdater.checkForUpdates().catch((err) => console.error('[auto-update]', err));
       }, UPDATE_CHECK_INTERVAL_MS);

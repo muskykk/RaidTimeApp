@@ -95,6 +95,11 @@ body {
   letter-spacing: 1px;
 }
 
+.app-version {
+  letter-spacing: normal;
+  opacity: 0.6;
+}
+
 .nav-group {
   display: flex;
   align-items: center;

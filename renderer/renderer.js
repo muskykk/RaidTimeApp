@@ -2083,4 +2083,10 @@
 
   renderWeekdays();
   loadData().then(renderCalendar);
+
+  if (window.api.getAppVersion) {
+    window.api.getAppVersion().then(function (v) {
+      document.getElementById('appVersion').textContent = v ? '· v' + v : '';
+    });
+  }
 })();
