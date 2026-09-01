@@ -55,7 +55,8 @@ whether the app launches at Windows startup.
 <img src="docs/screenshots/settings.png" width="380" alt="Settings">
 
 Your schedule is saved locally on your own machine — nothing is uploaded
-anywhere. This application does not have network capabilities.
+anywhere. This application does not have network capabilities other than the 
+ability to auto update to a newer version.
 
 ## License
 
